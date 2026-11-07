@@ -2135,7 +2135,7 @@ function renderHelp() {
    ends we start the next. A quick end with nothing heard counts as a
    failure; several in a row and we stop instead of looping.
    ===================================================================== */
-const HANDS_FREE_URL = '';
+const HANDS_FREE_URL = 'https://sus-tracker.vercel.app/';
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let handsFreeOK = false, listening = false, rec = null, micOK = false, quickEnds = [], lastHeard = {text: '', t: 0}, pausedByHide = false;
