@@ -1,0 +1,2609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Among Us companion: log what you see by voice, check if it's safe to skip, and plan a believable fake-task route.">
+<meta name="theme-color" content="#e7ebf2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0e1a" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='14' y='10' width='34' height='44' rx='17' fill='%23be1530'/%3E%3Crect x='26' y='18' width='26' height='14' rx='7' fill='%2341d2cb'/%3E%3Crect x='6' y='22' width='10' height='22' rx='5' fill='%23be1530'/%3E%3C/svg%3E">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>Sus Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Oxanium:wght@500;600;700;800&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: phone-first ship console. A sticky header holds your role, the meeting button and the vote meter; one scrolling panel below; five tabs docked at the bottom edge. */
+:root{
+  --bg:#e7ebf2;
+  --panel:#ffffff;
+  --panel-2:#f1f3f8;
+  --ink:#121625;
+  --ink-2:#4b5470;
+  --line:#d1d7e4;
+  --crew:#08717a;
+  --imp:#be1530;
+  --warn:#965800;
+  --ok:#1f7438;
+  --muted:#757d95;
+  --accent:var(--crew);
+  --on-accent:#ffffff;
+  --shadow:0 1px 2px rgb(18 22 37 / .06), 0 6px 18px rgb(18 22 37 / .06);
+  --font-display:'Oxanium','Rajdhani','Segoe UI',system-ui,sans-serif;
+  --font-body:'Atkinson Hyperlegible',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'Share Tech Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:14px;
+  --dock-h:62px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b0e1a; --panel:#141a2b; --panel-2:#1a2136; --ink:#e6eaf6; --ink-2:#9ba4c3; --line:#283050;
+    --crew:#41d2cb; --imp:#ff5a6c; --warn:#ffb44c; --ok:#5fd27d; --muted:#6d7593; --on-accent:#0b0e1a;
+    --shadow:0 1px 2px rgb(0 0 0 / .35), 0 8px 22px rgb(0 0 0 / .28);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b0e1a; --panel:#141a2b; --panel-2:#1a2136; --ink:#e6eaf6; --ink-2:#9ba4c3; --line:#283050;
+  --crew:#41d2cb; --imp:#ff5a6c; --warn:#ffb44c; --ok:#5fd27d; --muted:#6d7593; --on-accent:#0b0e1a;
+  --shadow:0 1px 2px rgb(0 0 0 / .35), 0 8px 22px rgb(0 0 0 / .28);
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--panel)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+h1,h2,h3{font-family:var(--font-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:.01em}
+p{margin:0}
+.app[data-mode="imp"]{--accent:var(--imp)}
+
+.wrap{max-width:760px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* ---------- header ---------- */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--panel);border-bottom:1px solid var(--line);box-shadow:inset 0 3px 0 var(--accent)}
+.top .wrap{padding-block:10px 10px;display:grid;gap:8px}
+.chrome{display:grid;gap:8px}
+
+/* voice log bar: lives outside #chrome so re-renders never steal its focus */
+.voicebar{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:6px;align-items:center}
+.vb-field{position:relative;min-width:0;display:block}
+.vb-field svg{position:absolute;left:11px;top:50%;width:18px;height:18px;transform:translateY(-50%);color:var(--accent);pointer-events:none}
+.vb-field input[type="text"]{padding-left:36px;height:42px}
+.vb-btn{height:42px;min-width:42px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font-weight:700;font-size:14px;display:grid;place-items:center}
+.vb-btn svg{width:20px;height:20px}
+.vb-go{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.vb-mic[aria-pressed="true"]{background:var(--imp);border-color:var(--imp);color:#fff;animation:alarm 1.6s ease-in-out infinite}
+.vresult{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;font-weight:700;line-height:1.35;padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink-2)}
+.vresult .vr-msg{min-width:0;overflow-wrap:anywhere}
+.vresult.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 8%,var(--panel))}
+.vresult.ok .vr-msg::before{content:"\2713\00a0"}
+.vresult.err{color:var(--imp);border-color:color-mix(in srgb,var(--imp) 45%,transparent);background:color-mix(in srgb,var(--imp) 7%,var(--panel))}
+.vresult .linkbtn{padding:0;flex:none}
+.sheet a{color:var(--accent);font-weight:700}
+.sheet .sec p + p{margin-top:6px}
+.says{display:grid;gap:12px;margin:0}
+.says dt{font-size:13px;font-weight:700;margin-bottom:5px}
+.says dd{margin:0;display:flex;flex-wrap:wrap;gap:6px}
+.say{font-family:var(--font-mono);font-size:13px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:3px 8px}
+.top-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:13px}
+.light{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.app[data-mode="imp"] .light{animation:alarm 1.6s ease-in-out infinite}
+@keyframes alarm{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--imp) 8%,transparent);opacity:.75}}
+.seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;padding:6px 12px;border-radius:999px;font-weight:700;font-size:13px;color:var(--ink-2);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.mode .seg button[data-v="crew"][aria-pressed="true"]{background:var(--crew)}
+.mode .seg button[data-v="imp"][aria-pressed="true"]{background:var(--imp)}
+.phase{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.phase-label{font-family:var(--font-mono);font-size:14px;letter-spacing:.06em;text-transform:uppercase}
+.mapchip{font-size:12px;color:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:2px 9px;background:var(--panel-2)}
+.meet{border:0;border-radius:999px;padding:8px 14px;font-weight:700;font-size:14px;background:var(--imp);color:#fff;display:inline-flex;align-items:center;gap:7px;box-shadow:0 2px 0 color-mix(in srgb,var(--imp) 55%,#000)}
+.meet.back{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);box-shadow:none}
+.meet svg{width:16px;height:16px}
+
+.crit{width:100%;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--panel-2);border-radius:12px;padding:8px 10px}
+.crit-txt{font-size:13px;color:var(--ink-2);white-space:nowrap}
+.crit-txt b{color:var(--ink);font-family:var(--font-display);font-size:15px}
+.tug{display:flex;gap:3px;flex-wrap:wrap;min-width:0}
+.tug i{width:9px;height:14px;border-radius:3px;background:var(--crew);display:block}
+.tug i.x{background:var(--imp)}
+.pill{font-family:var(--font-display);font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+.lvl-ok .pill,.pill.lvl-ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 10%,transparent)}
+.lvl-warn .pill,.pill.lvl-warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.lvl-crit .pill,.pill.lvl-crit{color:#fff;background:var(--imp)}
+.lvl-win .pill,.pill.lvl-win{color:var(--on-accent);background:var(--imp)}
+.lvl-over .pill,.pill.lvl-over{color:var(--ink-2);border-color:var(--line)}
+
+/* ---------- main ---------- */
+main.wrap{padding-block:16px calc(var(--dock-h) + env(safe-area-inset-bottom,0px) + 28px);display:grid;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:var(--shadow);min-width:0}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.card-head h2{font-size:19px}
+.sub{font-size:13px;color:var(--ink-2)}
+.hint{font-size:13px;color:var(--ink-2)}
+.eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.banner{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px dashed color-mix(in srgb,var(--accent) 55%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--panel));border-radius:var(--r);padding:12px 14px}
+.banner p{font-size:14px;max-width:46ch}
+
+.btn{border:1px solid transparent;background:var(--accent);color:var(--on-accent);font-weight:700;border-radius:10px;padding:9px 14px;font-size:14px;line-height:1.2}
+.btn.ghost{background:var(--panel-2);color:var(--ink);border-color:var(--line)}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:8px}
+.btn.big{width:100%;padding:14px;font-size:17px;font-family:var(--font-display);letter-spacing:.04em}
+.btn.danger{background:transparent;color:var(--imp);border-color:color-mix(in srgb,var(--imp) 45%,transparent)}
+.btn.armed{background:var(--imp);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px;align-items:center}
+.row > input{flex:1;min-width:0}
+input[type="text"],input[type="search"],select,textarea{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:16px;width:100%}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+label.lbl{display:block;font-size:13px;color:var(--ink-2);margin-bottom:5px;font-weight:700}
+
+/* swatches */
+.sw{--c:#888;width:30px;height:30px;border-radius:50%;background:var(--c);flex:none;display:inline-block;box-shadow:inset 0 -5px 0 rgb(0 0 0 / .18),0 0 0 1px var(--line)}
+.sw.sm{width:16px;height:16px;box-shadow:inset 0 -3px 0 rgb(0 0 0 / .18),0 0 0 1px var(--line)}
+.sw.lg{width:42px;height:42px}
+
+/* ---------- players ---------- */
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (min-width:560px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.pcard{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;row-gap:4px;align-items:center;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0;box-shadow:var(--shadow)}
+.pcard .sw{grid-row:span 2}
+.pname{font-weight:700;font-size:15px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.pline{display:flex;gap:5px;flex-wrap:wrap;align-items:center;min-width:0}
+.pseen{grid-column:1 / -1;font-size:12px;color:var(--ink-2);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-top:1px dashed var(--line);padding-top:6px;margin-top:2px}
+.tag{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);white-space:nowrap;background:var(--panel)}
+.tag.you{border-color:var(--accent);color:var(--accent)}
+.tag.st-safe{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.tag.st-sus{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.tag.st-dead,.tag.st-ejected{color:var(--muted)}
+.tag.partner{color:var(--imp);border-color:color-mix(in srgb,var(--imp) 50%,transparent)}
+.tag.vis{color:var(--crew);border-color:color-mix(in srgb,var(--crew) 50%,transparent)}
+.tag.common{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.tag.bad{color:var(--imp);border-color:color-mix(in srgb,var(--imp) 45%,transparent)}
+.tag.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.pcard.is-sus{border-color:color-mix(in srgb,var(--warn) 55%,var(--line))}
+.pcard.is-safe{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.pcard.is-gone{background:var(--panel-2);box-shadow:none}
+.pcard.is-gone .sw{opacity:.45}
+.pcard.is-gone .pname{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--ink-2)}
+.pcard.is-partner{border-color:color-mix(in srgb,var(--imp) 55%,var(--line))}
+
+.recent{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+
+/* ---------- sheet ---------- */
+.scrim{position:fixed;inset:0;z-index:40;background:rgb(6 8 16 / .55);display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:100%;max-width:640px;max-height:min(88vh,100%);overflow:auto;background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:grid;gap:16px;box-shadow:0 -10px 40px rgb(0 0 0 / .25)}
+@media (min-width:700px){.scrim{align-items:center}.sheet{border-radius:20px;border-bottom:1px solid var(--line);max-height:86vh}}
+.sheet-head{display:flex;align-items:center;gap:12px}
+.sheet-head h2{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.x{border:1px solid var(--line);background:var(--panel-2);border-radius:10px;width:38px;height:38px;display:grid;place-items:center;font-size:20px;line-height:1;color:var(--ink-2);flex:none}
+.sec h3{font-size:13px;font-family:var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);font-weight:400;margin-bottom:8px}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opt{border:1px solid var(--line);background:var(--panel-2);border-radius:10px;padding:8px 12px;font-weight:700;font-size:14px}
+.opt[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.opt.o-safe[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:var(--on-accent)}
+.opt.o-sus[aria-pressed="true"]{background:var(--warn);border-color:var(--warn);color:var(--on-accent)}
+.opt.o-dead[aria-pressed="true"],.opt.o-ejected[aria-pressed="true"]{background:var(--muted);border-color:var(--muted);color:var(--on-accent)}
+.rooms{display:flex;flex-wrap:wrap;gap:6px}
+.room{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:700}
+.room:active{background:var(--accent);color:var(--on-accent)}
+.mini-log{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px;color:var(--ink-2)}
+.mini-log li{font-family:var(--font-mono)}
+
+/* ---------- meeting ---------- */
+.verdict{border-radius:var(--r);padding:16px;border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow);display:grid;gap:10px}
+.verdict.lvl-crit,.verdict.lvl-win{border-color:var(--imp);background:color-mix(in srgb,var(--imp) 8%,var(--panel))}
+.verdict.lvl-warn{border-color:color-mix(in srgb,var(--warn) 60%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
+.verdict.lvl-ok{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.v-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.v-title{font-size:26px;line-height:1.1}
+.v-body{font-size:15px;max-width:58ch}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stat{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:grid;gap:2px;min-width:0}
+.stat b{font-family:var(--font-display);font-size:24px;line-height:1.1;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--ink-2)}
+.stepper{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.stepper button{border:1px solid var(--line);background:var(--panel);border-radius:7px;min-width:30px;height:28px;font-weight:700}
+.stepper .auto{font-size:12px;padding:0 8px}
+.wlist{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.wlist li{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);min-width:0}
+.wlist .who{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wlist .where{font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+.wlist .meta{display:grid;min-width:0}
+.tips{margin:0;padding-left:18px;display:grid;gap:6px;font-size:14px}
+.pickrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.pick{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:4px 10px 4px 4px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+.pick[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+
+/* ---------- tasks ---------- */
+.facts{display:grid;gap:12px;margin:0}
+.facts > div{display:grid;gap:5px}
+.facts dt{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.facts dd{margin:0;display:grid;gap:5px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:700}
+.chip.vis{border-color:color-mix(in srgb,var(--crew) 55%,var(--line))}
+.toggles{display:grid;gap:10px}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.toggle-row span{font-size:14px;font-weight:700}
+.watch-face{display:flex;align-items:baseline;justify-content:center;gap:4px;padding:10px 0 2px}
+.watch-num{font-family:var(--font-display);font-weight:700;font-size:64px;line-height:1;font-variant-numeric:tabular-nums}
+.watch-real{text-align:center;font-size:13px;color:var(--ink-2);margin-bottom:10px}
+.out{margin-top:10px;font-weight:700;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)}
+.out.lvl-bad{color:var(--imp);border-color:color-mix(in srgb,var(--imp) 45%,transparent)}
+.out.lvl-warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.out.lvl-ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.fake{border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:8px;background:var(--panel-2)}
+.fake-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fake-head b{font-size:16px;margin-right:auto}
+.stages{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.stage{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px}
+.stage.done{opacity:.6}
+.stage.done .s-where{text-decoration:line-through}
+.tick{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);display:grid;place-items:center;font-weight:800;color:transparent}
+.tick[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:var(--on-accent)}
+.s-main{min-width:0;display:grid;gap:4px}
+.s-where{font-weight:700;font-size:14px}
+.s-time{font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+.warns{display:flex;gap:5px;flex-wrap:wrap}
+.tgroup + .tgroup{margin-top:14px}
+.tgroup h3{font-family:var(--font-mono);font-weight:400;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin-bottom:6px}
+.tlist{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.trow{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--panel-2)}
+.trow .t-name{font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.trow .t-chain{grid-column:1 / 2;font-size:13px;color:var(--ink-2);min-width:0}
+.trow .t-side{grid-row:1 / span 2;grid-column:2;display:grid;gap:6px;justify-items:end;text-align:right}
+.trow .t-time{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+
+/* ---------- impostor route ---------- */
+.from-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.from-row .lbl{margin:0;white-space:nowrap}
+.from-row select{flex:1;min-width:0}
+.nextstop{border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--panel));border-radius:14px;padding:14px;display:grid;gap:8px}
+.nextstop.done{border-style:dashed}
+.next-room{font-size:30px;line-height:1.05;font-weight:800}
+.next-steps{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.next-steps li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+.ns-main{display:grid;gap:4px;min-width:0}
+.ns-main .s-time{font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+.ns-btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.wait-note{font-weight:700;color:var(--warn)}
+.waits{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:4px;font-size:13px;color:var(--ink-2)}
+.waits span,.wait-note span{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.path{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pathstop{font-size:13px;font-weight:700;padding:4px 9px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line)}
+.pathstop.here{border-color:var(--accent);color:var(--accent)}
+.arrow{color:var(--muted);font-size:13px}
+.stops{margin:10px 0 0;padding-left:22px;display:grid;gap:6px;font-size:14px}
+.stops li span{display:block;font-size:13px;color:var(--ink-2)}
+.linkbtn{border:0;background:transparent;color:var(--accent);font-weight:700;font-size:13px;padding:6px 0;text-align:left;justify-self:start;text-decoration:underline;text-underline-offset:3px}
+
+/* ---------- log ---------- */
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.phase-h{font-family:var(--font-mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);margin:4px 0 6px;display:flex;align-items:center;gap:8px}
+.phase-h::after{content:"";flex:1;border-top:1px solid var(--line)}
+.events{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.ev{display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:0}
+.ev time{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.ev .txt{min-width:0;overflow-wrap:anywhere;font-size:14px}
+.ev .del{border:0;background:transparent;color:var(--muted);font-size:18px;width:30px;height:30px;border-radius:8px}
+.ev.k-body{border-color:color-mix(in srgb,var(--imp) 45%,var(--line))}
+.ev.k-meet,.ev.k-round{background:var(--panel-2)}
+.ev .ico{width:16px;height:16px;display:grid;place-items:center;color:var(--ink-2)}
+.empty{font-size:14px;color:var(--ink-2);padding:6px 2px}
+
+/* ---------- setup ---------- */
+.colors{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+@media (max-width:420px){.colors{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.cbtn{border:1px solid var(--line);background:var(--panel-2);border-radius:10px;padding:8px 4px;display:grid;justify-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--ink-2)}
+.cbtn[aria-pressed="true"]{border-color:var(--accent);color:var(--ink);background:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.cbtn[aria-pressed="false"] .sw{opacity:.35}
+.names{display:grid;gap:8px}
+.name-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+.name-row .me-btn{border:1px solid var(--line);background:var(--panel-2);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.name-row .me-btn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.mapbtn{border:1px solid var(--line);background:var(--panel-2);border-radius:12px;padding:10px;text-align:left;display:grid;gap:2px}
+.mapbtn b{font-family:var(--font-display);font-size:15px}
+.mapbtn span{font-size:12px;color:var(--ink-2)}
+.mapbtn[aria-pressed="true"]{border-color:var(--accent);background:var(--panel);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.about{font-size:13px;color:var(--ink-2);display:grid;gap:6px}
+.about a{color:var(--accent)}
+
+/* ---------- dock ---------- */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.dock-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.dock button{border:0;background:transparent;height:var(--dock-h);display:grid;justify-items:center;align-content:center;gap:4px;font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--ink-2);position:relative}
+.dock svg{width:22px;height:22px}
+.dock button[aria-current="page"]{color:var(--accent)}
+.dock button[aria-current="page"]::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;border-radius:0 0 3px 3px;background:var(--accent)}
+.badge{position:absolute;top:8px;right:calc(50% - 20px);min-width:16px;height:16px;border-radius:8px;background:var(--imp);color:#fff;font-size:10px;display:grid;place-items:center;padding:0 4px}
+
+/* ---------- timer overlay ---------- */
+.timer{position:fixed;inset:0;z-index:50;background:color-mix(in srgb,var(--bg) 92%,transparent);display:grid;place-items:center;padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.timer-card{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:22px;display:grid;gap:10px;justify-items:center;text-align:center;box-shadow:var(--shadow)}
+.timer-card h2{font-size:22px}
+.ring{position:relative;width:min(240px,64vw);aspect-ratio:1;max-width:100%}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:9}
+.ring .track{stroke:var(--line)}
+.ring .prog{stroke:var(--accent);stroke-linecap:round;transition:stroke-dashoffset .1s linear}
+.ring-num{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--font-display);font-weight:800;font-size:clamp(48px,16vw,72px);font-variant-numeric:tabular-nums}
+.timer.done .prog{stroke:var(--ok)}
+
+.toast{position:fixed;left:50%;bottom:calc(var(--dock-h) + env(safe-area-inset-bottom,0px) + 12px);transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:10px;font-size:14px;font-weight:700;max-width:calc(100% - 32px);box-shadow:var(--shadow)}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+
+<div class="app" id="app" data-mode="crew">
+  <header class="top">
+    <div class="wrap">
+      <div class="chrome" id="chrome"></div>
+      <form class="voicebar" id="voicebar" data-form="voice" autocomplete="off">
+        <label class="vb-field" for="vlog">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <input type="text" id="vlog" enterkeyhint="go" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="Say &quot;black in admin&quot;" aria-label="Voice log. Say or type what you saw, like black in admin">
+        </label>
+        <button type="button" class="vb-btn vb-mic" id="vb-mic" data-action="handsFree" aria-pressed="false" aria-label="Listen hands-free" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+        <button type="submit" class="vb-btn vb-go">Log</button>
+        <button type="button" class="vb-btn vb-help" data-action="voiceHelp" aria-label="What you can say">?</button>
+      </form>
+      <div class="vresult" id="vresult" role="status" aria-live="polite" hidden></div>
+    </div>
+  </header>
+  <main class="wrap" id="view" tabindex="-1"></main>
+  <nav class="dock" aria-label="Sections">
+    <div class="dock-in" id="dock"></div>
+  </nav>
+  <div class="scrim" id="sheet" hidden></div>
+  <div class="timer" id="timer" hidden role="dialog" aria-modal="true" aria-labelledby="timer-title">
+    <div class="timer-card">
+      <p class="eyebrow" id="timer-kicker">Hold at the panel</p>
+      <h2 id="timer-title">Task</h2>
+      <p class="sub" id="timer-sub"></p>
+      <div class="ring">
+        <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="52"></circle><circle class="prog" id="timer-prog" cx="60" cy="60" r="52" stroke-dasharray="326.73" stroke-dashoffset="0"></circle></svg>
+        <span class="ring-num" id="timer-num">0.0</span>
+      </div>
+      <p class="hint" id="timer-note">Stand still at the panel. Walk away when it hits zero.</p>
+      <button class="btn ghost" type="button" data-action="timerStop">Cancel</button>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+
+<script>
+'use strict';
+/* =====================================================================
+   1. GAME DATA
+   Player colors, then one entry per map. Each task lists its stages in
+   order. A stage has: w = where you do it, s = seconds (a number for a
+   fixed timer, [min, max] for a typical range, null when it varies),
+   est = the time is a rough estimate, vis = visual stage (others can see
+   it), wait = a built-in wait in seconds before the next stage.
+   ===================================================================== */
+const COLORS = [
+  {id:'red',name:'Red',hex:'#C51111'},{id:'blue',name:'Blue',hex:'#132ED1'},
+  {id:'green',name:'Green',hex:'#117F2D'},{id:'pink',name:'Pink',hex:'#ED54BA'},
+  {id:'orange',name:'Orange',hex:'#EF7D0D'},{id:'yellow',name:'Yellow',hex:'#F5F557'},
+  {id:'black',name:'Black',hex:'#3F474E'},{id:'white',name:'White',hex:'#D6E0F0'},
+  {id:'purple',name:'Purple',hex:'#6B2FBB'},{id:'brown',name:'Brown',hex:'#71491E'},
+  {id:'cyan',name:'Cyan',hex:'#38FEDC'},{id:'lime',name:'Lime',hex:'#50EF39'},
+  {id:'maroon',name:'Maroon',hex:'#6B2B3C'},{id:'rose',name:'Rose',hex:'#ECC0D3'},
+  {id:'banana',name:'Banana',hex:'#FFFEBE'},{id:'gray',name:'Gray',hex:'#758593'},
+  {id:'tan',name:'Tan',hex:'#928776'},{id:'coral',name:'Coral',hex:'#EC7578'}
+];
+const COLOR = Object.fromEntries(COLORS.map(c => [c.id, c]));
+
+/*__MAPS_START__*/
+/* Task types (common / short / long), rooms and room positions come from the game's
+   own data files (game version 2026.9.29). Stage order and times come from the Among Us
+   Wiki and guide sites. est:true marks a rough time estimate.
+
+   Each task step (st) has:
+     r     rooms where this step can happen
+     d     what you do there (optional)
+     s     seconds: a number, [min, max], or null when it varies
+     wait  built-in wait in seconds before the next step (you can walk away)
+     vis   visual step (other players can see it)
+     pick  the room comes from your task list, so the tool asks you
+     auto  any of these rooms works, so the route picks the closest
+     pair  same choice as the previous step (option 1 goes with option 1)
+     wire  a Fix Wiring panel; panels are always done in the order of t.panels
+   pos   map position of each room (game units), used to plan a walking route
+   gate  rooms you can only reach through another spot (decontamination, a ladder)
+*/
+const MAPS = {
+  skeld: {
+    name: 'The Skeld',
+    rooms: ['Cafeteria','Weapons','O2','Navigation','Shields','Communications','Storage','Admin','Electrical','Lower Engine','Security','Reactor','Upper Engine','MedBay','Hallway'],
+    spawn: 'Cafeteria', meet: 'Cafeteria',
+    pos: {'Cafeteria':[-0.6,0.5],'Weapons':[9,2.6],'O2':[6.5,-3.5],'Navigation':[16.3,-4.5],'Shields':[8.5,-14.2],'Communications':[4.5,-15.5],'Storage':[-1.5,-11.5],'Admin':[3.5,-7.5],'Electrical':[-8.7,-7.9],'Lower Engine':[-16.5,-11.7],'Security':[-13.8,-5.6],'Reactor':[-21.8,-4.5],'Upper Engine':[-16.5,0.3],'MedBay':[-8.3,-3.5],'Hallway':[9.4,-6.4]},
+    gate: {},
+    upload: 'Admin',
+    critical: [
+      {name: 'Reactor Meltdown', fix: 'two people hold the two hand scanners in Reactor at the same time', secs: 30},
+      {name: 'Oxygen Depleted', fix: 'enter the code at the keypads in O2 and Admin', secs: 30}
+    ],
+    sabotage: ['Lights: flip the switches in Electrical.', 'Comms: fix the dial in Communications. Until then task lists, cameras and the admin map are blank.', 'Doors: impostors can shut most rooms for about 10 seconds.'],
+    dummies: ['The Divert Power panel in Reactor can\'t be used.'],
+    tasks: [
+      {n:'Fix Wiring', t:'common', panels:['Electrical','Storage','Admin','Navigation','Cafeteria','Security'], st:[{wire:true, s:[4,5]},{wire:true, s:[4,5]},{wire:true, s:[4,5]}], tip:'Three of Electrical, Storage, Admin, Navigation, Cafeteria, Security, always in that order.'},
+      {n:'Swipe Card', t:'common', st:[{r:['Admin'], s:[2,5]}], tip:'Real players often fail a swipe, so a flat 2 seconds can look fake.'},
+      {n:'Align Engine Output', t:'long', st:[{r:['Upper Engine'], s:[2,4], est:true},{r:['Lower Engine'], s:[2,4], est:true}]},
+      {n:'Clear Asteroids', t:'long', st:[{r:['Weapons'], s:null, vis:true}], tip:'Lasers fire outside the ship with every shot.'},
+      {n:'Empty Chute', t:'long', st:[{r:['O2'], s:[3,4]},{r:['Storage'], s:[3,4], vis:true}], tip:'Trash shoots out of the ship at the Storage step.'},
+      {n:'Empty Garbage', t:'long', st:[{r:['Cafeteria'], s:[3,4]},{r:['Storage'], s:[3,4], vis:true}], tip:'Trash shoots out of the ship at the Storage step.'},
+      {n:'Fuel Engines', t:'long', st:[{r:['Storage'], d:'fill the can', s:[3,6]},{r:['Upper Engine'], d:'fuel it', s:[3,6]},{r:['Storage'], d:'refill the can', s:[3,6]},{r:['Lower Engine'], d:'fuel it', s:[3,6]}]},
+      {n:'Inspect Sample', t:'long', st:[{r:['MedBay'], d:'start the test', s:[1,2], est:true, wait:60},{r:['MedBay'], d:'pick the sample', s:[1,3], est:true}], tip:'Start it, leave, come back about a minute later.'},
+      {n:'Start Reactor', t:'long', st:[{r:['Reactor'], s:null}], tip:'A memory game, so real times vary a lot.'},
+      {n:'Submit Scan', t:'long', st:[{r:['MedBay'], s:10, vis:true}]},
+      {n:'Calibrate Distributor', t:'short', st:[{r:['Electrical'], s:[5,7]}]},
+      {n:'Chart Course', t:'short', st:[{r:['Navigation'], s:[2,4], est:true}]},
+      {n:'Clean O2 Filter', t:'short', st:[{r:['O2'], s:[4,6], est:true}]},
+      {n:'Clean Vent', t:'short', st:[{r:['Admin','Cafeteria','Electrical','Hallway','Lower Engine','MedBay','Navigation','Reactor','Security','Shields','Upper Engine','Weapons'], pick:true, ask:'Which room does your list name for Clean Vent?', s:[1,3]}], tip:'Cleaning a vent kicks out anyone hiding inside it.'},
+      {n:'Divert Power', t:'short', st:[{r:['Electrical'], d:'divert', s:[1,2]},{r:['Upper Engine','Lower Engine','Weapons','Shields','Navigation','Communications','O2','Security'], pick:true, ask:'Your list says "Divert Power to ___". Which room?', d:'accept', s:[1,2]}]},
+      {n:'Prime Shields', t:'short', st:[{r:['Shields'], s:[2,3], est:true, vis:true}], tip:'The shields outside light up when it\'s done.'},
+      {n:'Stabilize Steering', t:'short', st:[{r:['Navigation'], s:[3,6], est:true}]},
+      {n:'Unlock Manifolds', t:'short', st:[{r:['Reactor'], s:[5,8]}]},
+      {n:'Upload Data', t:'short', st:[{r:['Cafeteria','Communications','Electrical','Navigation','Weapons'], pick:true, ask:'Which room does your list say to download in?', d:'download', s:8.7},{r:['Admin'], d:'upload', s:8.7}], tip:'The upload is always in Admin.'}
+    ]
+  },
+
+  mira: {
+    name: 'MIRA HQ',
+    rooms: ['Launchpad','Locker Room','Decontamination','Reactor','Laboratory','Communications','MedBay','Hallway','Greenhouse','Office','Admin','Cafeteria','Storage','Balcony'],
+    spawn: 'Launchpad', meet: 'Cafeteria',
+    pos: {'Launchpad':[-4.3,2.7],'Locker Room':[4.3,1.5],'Decontamination':[6.8,3.2],'Reactor':[0.9,11.7],'Laboratory':[9.2,13.6],'Communications':[12.5,3.5],'MedBay':[15.8,-0.8],'Hallway':[18,7.6],'Greenhouse':[17.4,23.7],'Office':[14.5,20.8],'Admin':[21.2,18.1],'Cafeteria':[27.5,5.7],'Storage':[19.5,2],'Balcony':[24.5,-1.8]},
+    gate: {'Reactor':'Decontamination','Laboratory':'Decontamination','Greenhouse':'Hallway','Office':'Hallway','Admin':'Hallway'},
+    upload: null,
+    critical: [
+      {name: 'Reactor Meltdown', fix: 'two people hold the two hand scanners in Reactor at the same time', secs: 45},
+      {name: 'Oxygen Depleted', fix: 'enter the code at the keypads in Greenhouse and in the hallway between Launchpad and MedBay', secs: 45}
+    ],
+    sabotage: ['Lights: fix in Office.', 'Comms: enter the code at the keypads in Office and Communications.', 'No door sabotage. Instead the door log in Communications records who walked past its sensors.'],
+    dummies: [],
+    tasks: [
+      {n:'Enter Id Code', t:'common', st:[{r:['Admin'], s:[6,9], est:true}], tip:'You type the whole code from your ID card.'},
+      {n:'Fix Wiring', t:'common', panels:['Storage','Hallway','Locker Room','Greenhouse','Laboratory'], st:[{wire:true, s:[4,5]},{wire:true, s:[4,5]},{wire:true, s:[4,5]}], tip:'Three of Storage, Hallway, Locker Room, Greenhouse, Laboratory, always in that order.'},
+      {n:'Clear Asteroids', t:'long', st:[{r:['Balcony'], s:null}], tip:'Not a visual task on this map.'},
+      {n:'Divert Power', t:'long', st:[{r:['Reactor'], d:'divert', s:[1,2]},{r:['Admin','Cafeteria','Communications','Greenhouse','Laboratory','Launchpad','MedBay','Office'], pick:true, ask:'Your list says "Divert Power to ___". Which room?', d:'accept', s:[1,2]}]},
+      {n:'Start Reactor', t:'long', st:[{r:['Reactor'], s:null}], tip:'A memory game, so real times vary a lot.'},
+      {n:'Submit Scan', t:'long', st:[{r:['MedBay'], s:10, vis:true}], tip:'The only visual task on MIRA HQ.'},
+      {n:'Water Plants', t:'long', st:[{r:['Storage'], d:'grab the can', s:[1,2], est:true},{r:['Greenhouse'], d:'water the plants', s:[4,6], est:true}]},
+      {n:'Assemble Artifact', t:'short', st:[{r:['Laboratory'], s:[5,8]}]},
+      {n:'Buy Beverage', t:'short', st:[{r:['Cafeteria'], s:[3,5], est:true}]},
+      {n:'Chart Course', t:'short', st:[{r:['Admin'], s:[2,4], est:true}]},
+      {n:'Clean O2 Filter', t:'short', st:[{r:['Greenhouse'], s:[4,6], est:true}]},
+      {n:'Clean Vent', t:'short', st:[{r:['Admin','Balcony','Decontamination','Greenhouse','Hallway','Laboratory','Launchpad','Locker Room','MedBay','Office','Reactor'], pick:true, ask:'Which room does your list name for Clean Vent?', s:[1,3]}], tip:'Cleaning a vent kicks out anyone hiding inside it.'},
+      {n:'Empty Garbage', t:'short', st:[{r:['Cafeteria'], s:[3,4]}], tip:'Not a visual task on this map.'},
+      {n:'Fuel Engines', t:'short', st:[{r:['Launchpad'], s:[3,6]}], tip:'One stage on this map.'},
+      {n:'Measure Weather', t:'short', st:[{r:['Balcony'], s:6}]},
+      {n:'Prime Shields', t:'short', st:[{r:['Admin'], s:[2,3], est:true}], tip:'Not a visual task on this map.'},
+      {n:'Process Data', t:'short', st:[{r:['Office'], s:[10.5,12]}]},
+      {n:'Run Diagnostics', t:'short', st:[{r:['Launchpad'], d:'start the scan', s:[1,2], est:true, wait:90},{r:['Launchpad'], d:'tap the red part', s:[1,3], est:true}], tip:'Guides say the wait is 45 to 90 seconds, so anything in that range is believable.'},
+      {n:'Sort Samples', t:'short', st:[{r:['Laboratory'], s:[5,8]}]},
+      {n:'Unlock Manifolds', t:'short', st:[{r:['Reactor'], s:[5,8]}]}
+    ]
+  },
+
+  polus: {
+    name: 'Polus',
+    rooms: ['Dropship','Office','Admin','Communications','Weapons','O2','Boiler Room','Electrical','Security','Storage','Laboratory','Specimen Room','Decontamination','Outside'],
+    spawn: 'Dropship', meet: 'Office',
+    pos: {'Dropship':[16.7,0.1],'Office':[22.6,-17.9],'Admin':[21.5,-22.5],'Communications':[11.5,-15.7],'Weapons':[11.5,-21.6],'O2':[4.8,-19.7],'Boiler Room':[2.3,-24],'Electrical':[6.8,-10.6],'Security':[2.5,-12],'Storage':[17.3,-10.9],'Laboratory':[33,-7.8],'Specimen Room':[35.2,-19.1],'Decontamination':[33.4,-15.6],'Outside':[16.5,-14],
+      'Outside, right of the Dropship':[20,-1],'Outside, left of the Dropship':[13,-1],'Outside, by the Office door':[18.4,-23.7],'Outside, by the thermometer':[30.9,-15.3]},
+    gate: {},
+    upload: 'Communications',
+    critical: [
+      {name: 'Reset Seismic Stabilizers', fix: 'two people hold the hand scanners outside, one above Electrical and one next to Laboratory, on either side of the Dropship', secs: 60}
+    ],
+    sabotage: ['Lights: fix in Electrical.', 'Comms: fix in Communications.', 'Doors: crew can open a shut door by flipping its switches.'],
+    dummies: ['The Accept Diverted Power panel in Office is fake. Polus has no Divert Power task at all.'],
+    tasks: [
+      {n:'Fix Wiring', t:'common', panels:['Electrical','O2','Office','Decontamination','Laboratory','Laboratory'], st:[{wire:true, s:[4,5]},{wire:true, s:[4,5]},{wire:true, s:[4,5]}], tip:'Three of Electrical, O2, Office, Decontamination, Laboratory (two panels), always in that order.'},
+      {n:'Insert Keys', t:'common', st:[{r:['Dropship'], s:[2,4], est:true}]},
+      {n:'Scan Boarding Pass', t:'common', st:[{r:['Office'], s:[3,5], est:true}]},
+      {n:'Swipe Card', t:'common', st:[{r:['Office'], s:[2,5]}], tip:'Real players often fail a swipe, so a flat 2 seconds can look fake.'},
+      {n:'Fix Weather Node', t:'long', st:[{r:['Outside'], d:'the node named on your list', s:[4,8], est:true},{r:['Laboratory'], d:'start the node', s:[1,2], est:true}], tip:'Can be short or long here.'},
+      {n:'Fuel Engines', t:'long', st:[{r:['Storage'], d:'fill the can', s:[3,6]},{r:['Outside, right of the Dropship'], d:'fuel the engine', s:[3,6]},{r:['Storage'], d:'refill the can', s:[3,6]},{r:['Outside, left of the Dropship'], d:'fuel the engine', s:[3,6]}]},
+      {n:'Inspect Sample', t:'long', st:[{r:['Laboratory'], d:'start the test', s:[1,2], est:true, wait:60},{r:['Laboratory'], d:'pick the sample', s:[1,3], est:true}], tip:'Your list may say MedBay. It\'s the scanner corner inside Laboratory.'},
+      {n:'Open Waterways', t:'long', st:[{r:['Boiler Room'], d:'1st wheel', s:[3,5], est:true},{r:['Boiler Room'], d:'2nd wheel', s:[3,5], est:true},{r:['Outside, by the Office door'], d:'last wheel', s:[3,5], est:true}], tip:'The only task whose stages can be done in any order.'},
+      {n:'Reboot Wifi', t:'long', st:[{r:['Communications'], d:'pull the lever down', s:[1,2], est:true, wait:60},{r:['Communications'], d:'push it back up', s:[3,4]}], tip:'Pull it, leave, come back a minute later.'},
+      {n:'Replace Water Jug', t:'long', st:[{r:['Boiler Room'], d:'fill the jug', s:[4,6], est:true},{r:['Office'], d:'swap the jug', s:[4,6], est:true}]},
+      {n:'Start Reactor', t:'long', st:[{r:['Specimen Room'], s:null}], tip:'A memory game, so real times vary a lot.'},
+      {n:'Upload Data', t:'long', st:[{r:['Electrical','O2','Office','Specimen Room','Weapons'], pick:true, ask:'Which room does your list say to download in?', d:'download', s:8.7},{r:['Communications'], d:'upload', s:8.7}], tip:'The upload is always in Communications.'},
+      {n:'Align Telescope', t:'short', st:[{r:['Laboratory'], s:[3,5], est:true}]},
+      {n:'Chart Course', t:'short', st:[{r:['Dropship'], s:[2,4], est:true}]},
+      {n:'Clear Asteroids', t:'short', st:[{r:['Weapons'], s:null, vis:true}], tip:'Lasers fire into space with every shot.'},
+      {n:'Empty Garbage', t:'short', st:[{r:['O2'], s:[3,4]}], tip:'Not a visual task on this map.'},
+      {n:'Fill Canisters', t:'short', st:[{r:['O2'], s:[7,9]}]},
+      {n:'Monitor Tree', t:'short', st:[{r:['O2'], s:[4,6], est:true}]},
+      {n:'Record Temperature', t:'short', st:[{r:['Laboratory','Outside, by the thermometer'], pick:true, ask:'Does your list say Laboratory or Outside?', s:[3,5], est:true}]},
+      {n:'Repair Drill', t:'short', st:[{r:['Laboratory'], s:[2,4], est:true}]},
+      {n:'Store Artifacts', t:'short', st:[{r:['Specimen Room'], s:[5,8], est:true}]},
+      {n:'Submit Scan', t:'short', st:[{r:['Laboratory'], s:10, vis:true}], tip:'Your list may say MedBay. It\'s the scanner corner inside Laboratory.'},
+      {n:'Unlock Manifolds', t:'short', st:[{r:['Specimen Room'], s:[5,8]}]}
+    ]
+  },
+
+  airship: {
+    name: 'The Airship',
+    rooms: ['Cockpit','Armory','Viewing Deck','Engine Room','Communications','Vault','Brig','Gap Room','Meeting Room','Main Hall','Records','Lounge','Showers','Cargo Bay','Medical','Electrical','Kitchen','Security','Ventilation','Hall of Portraits','Outside'],
+    spawn: 'Main Hall', meet: 'Main Hall',
+    spawnChoices: ['Main Hall','Brig','Engine Room','Kitchen','Records','Cargo Bay'],
+    pos: {'Cockpit':[-22,-1],'Armory':[-10,-6],'Communications':[-12.3,-1],'Viewing Deck':[-12,-14],'Kitchen':[-5.4,-9.8],'Engine Room':[-3.4,-0.5],'Vault':[-9.6,8],'Brig':[-0.6,8.3],'Gap Room':[8.1,6.4],'Gap Room ladder':[3.6,6.9],'Meeting Room':[14.1,16.5],'Main Hall':[11.9,1.2],'Records':[20.2,9.9],'Lounge':[31.1,7.6],'Showers':[20.8,1.1],'Cargo Bay':[34,-0.8],'Ventilation':[27,1.5],'Medical':[26.9,-6.6],'Electrical':[17.3,-5.9],'Security':[8.1,-11.5],'Hall of Portraits':[1.5,-11],'Outside':[-1,-16.4],
+      'Outside, Viewing Deck balcony':[-14.5,-16.4],'Outside, Security balcony':[10.5,-16.2],'Ventilation, Cargo Bay side':[30,0],'Ventilation, Showers side':[24,2]},
+    gate: {'Meeting Room':'Gap Room ladder','Vault':'Brig'},
+    upload: 'Outside, on the Viewing Deck or Security balcony',
+    critical: [
+      {name: 'Avert Crash Course', fix: 'enter the code at both keypads in Gap Room, one on each side of the gap', secs: 90}
+    ],
+    sabotage: ['Lights: fix any one of the panels in Gap Room, Viewing Deck or Cargo Bay.', 'Comms: fix in Communications.', 'Doors: stay shut until a crewmate opens them.'],
+    dummies: ['Fix Wiring panels in Armory, in the hallway outside Communications, and in Vault can\'t be used.', 'The Vault slider on the Divert Power panel in Electrical does nothing.'],
+    tasks: [
+      {n:'Fix Wiring', t:'common', panels:['Viewing Deck','Engine Room','Main Hall','Showers','Lounge','Cargo Bay','Meeting Room'], st:[{wire:true, s:[4,5]},{wire:true, s:[4,5]},{wire:true, s:[4,5]}], tip:'Three of Viewing Deck, Engine Room, Main Hall, Showers, Lounge, Cargo Bay, Meeting Room, always in that order.'},
+      {n:'Enter Id Code', t:'common', st:[{r:['Meeting Room'], s:[6,9], est:true}], tip:'You type the whole code from your ID card. Meeting Room is reached by the ladder in Gap Room.'},
+      {n:'Calibrate Distributor', t:'long', st:[{r:['Electrical'], s:[5,7]}], tip:'A miss restarts it, so a longer stay is believable.'},
+      {n:'Develop Photos', t:'long', st:[{r:['Main Hall'], d:'start in the darkroom', s:[4,6], wait:60},{r:['Main Hall'], d:'collect the photos', s:[1,3], est:true}], tip:'Start it, leave, come back about a minute later.'},
+      {n:'Empty Garbage', t:'long', st:[{r:['Main Hall','Medical','Kitchen','Showers','Lounge'], pick:true, ask:'Which room\'s bin does your list name?', d:'grab the bag', s:[3,4]},{r:['Meeting Room'], d:'chute lever', s:[3,4]}]},
+      {n:'Fuel Engines', t:'long', st:[{r:['Cargo Bay'], d:'fill the can', s:[4,6]},{r:['Engine Room'], d:'fuel the engine', s:[4,6]}]},
+      {n:'Reset Breakers', t:'long', st:[{r:['Electrical'], d:'breakers 1 to 7', s:[10,15], est:true}], tip:'The breakers are spread through the Electrical maze.'},
+      {n:'Rewind Tapes', t:'long', st:[{r:['Security'], s:[10,15], est:true}]},
+      {n:'Start Fans', t:'long', st:[{r:['Ventilation, Cargo Bay side'], d:'read the code', s:[3,4]},{r:['Ventilation, Showers side'], d:'enter the code', s:[4,6]}], tip:'The two sides don\'t connect, so you walk around through Records and Showers.'},
+      {n:'Unlock Safe', t:'long', st:[{r:['Cargo Bay'], s:[8,10]}]},
+      {n:'Upload Data', t:'long', st:[{r:['Armory','Brig','Cargo Bay','Cockpit','Communications','Gap Room','Medical','Records','Vault','Viewing Deck'], pick:true, ask:'Which room does your list say to download in?', d:'download', s:9},{r:['Outside, Viewing Deck balcony','Outside, Security balcony'], auto:true, any:'Outside, either balcony', d:'upload', s:[6,8]}], tip:'Can be short or long here. Either outside balcony works for the upload.'},
+      {n:'Clean Toilet', t:'short', st:[{r:['Lounge'], s:[3,5]}]},
+      {n:'Clean Vent', t:'short', st:[{r:['Cargo Bay','Cockpit','Engine Room','Gap Room','Kitchen','Main Hall','Records','Showers','Vault','Viewing Deck'], pick:true, ask:'Which room does your list name for Clean Vent?', s:[1,3]}], tip:'Cleaning a vent kicks out anyone hiding inside it.'},
+      {n:'Decontaminate', t:'short', st:[{r:['Main Hall'], s:[7,9]}]},
+      {n:'Divert Power', t:'short', st:[{r:['Electrical'], d:'divert', s:[1,2]},{r:['Armory','Cockpit','Engine Room','Gap Room','Main Hall','Meeting Room','Showers'], pick:true, ask:'Your list says "Divert Power to ___". Which room?', d:'accept', s:[1,2]}]},
+      {n:'Dress Mannequin', t:'short', st:[{r:['Vault'], s:[6,7]}]},
+      {n:'Fix Shower', t:'short', st:[{r:['Showers'], s:[6,8]}]},
+      {n:'Make Burger', t:'short', st:[{r:['Kitchen'], s:[6,8]}]},
+      {n:'Pick Up Towels', t:'short', st:[{r:['Showers'], s:[8,10]}]},
+      {n:'Polish Ruby', t:'short', st:[{r:['Vault'], s:[6,8]}]},
+      {n:'Put Away Pistols', t:'short', st:[{r:['Armory'], s:[5,8]}]},
+      {n:'Put Away Rifles', t:'short', st:[{r:['Armory'], s:[3,5]}]},
+      {n:'Sort Records', t:'short', st:[{r:['Records'], s:[4,8]}], tip:'Four folders at 1 to 2 seconds each.'},
+      {n:'Stabilize Steering', t:'short', st:[{r:['Cockpit'], s:[4,6]}]}
+    ]
+  },
+
+  fungle: {
+    name: 'The Fungle',
+    rooms: ['Beach','Cafeteria','Kitchen','Dock','Splash Zone','Storage','Meeting Room','The Dorm','Jungle','Laboratory','Greenhouse','Reactor','Upper Engine','Lookout','Mining Pit','Communications','The Cliffs','Dropship'],
+    spawn: 'Beach', meet: 'Meeting Room',
+    pos: {'Beach':[-9.6,1.7],'Cafeteria':[-5,9],'Kitchen':[-13.7,-7.2],'Dock':[-24.4,-6.8],'Splash Zone':[-19.9,-0.5],'Storage':[-1.6,4.6],'Meeting Room':[-1.5,-2],'The Dorm':[3.3,-1.1],'Jungle':[8,-12],'Laboratory':[-4.3,-8.3],'Greenhouse':[8.7,-11.3],'Reactor':[22.4,-6.8],'Upper Engine':[17,-3],'Lookout':[9.8,4.2],'Mining Pit':[12.7,9.1],'Communications':[21,13.6],'The Cliffs':[15,2],'Dropship':[-11.1,13.4]},
+    gate: {},
+    upload: null,
+    critical: [
+      {name: 'Reactor Meltdown', fix: 'two people hold the two hand scanners in Reactor at the same time', secs: 60}
+    ],
+    sabotage: ['Comms: enter the code at the keypads in Communications and Lookout.', 'Mushroom Mixup: everyone looks the same for about 10 seconds. It ends on its own.', 'Doors: mushroom walls in Communications, Kitchen, Laboratory, Lookout, Mining Pit, Reactor and Storage. Crew can break them.'],
+    dummies: [],
+    tasks: [
+      {n:'Collect Samples', t:'common', st:[{r:['Jungle'], d:'collect samples', s:[5,8], est:true},{r:['Laboratory'], d:'sort them into jars', s:[4,6], est:true}]},
+      {n:'Enter Id Code', t:'common', st:[{r:['Lookout'], s:[5,8], est:true}], tip:'You type the whole code from your ID card.'},
+      {n:'Replace Parts', t:'common', st:[{r:['Reactor','Upper Engine'], pick:true, ask:'Where does your list say to grab the parts?', d:'grab parts', s:[3,5], est:true},{r:['Communications','Dropship'], pair:true, d:'swap them in', s:[3,5], est:true}], tip:'Parts from Reactor go to Communications. Parts from Upper Engine go to Dropship.'},
+      {n:'Roast Marshmallow', t:'common', st:[{r:['Beach'], d:'collect a stick', s:[1,2], est:true},{r:['Beach'], d:'roast it at the campfire', s:[5,8], est:true}], tip:'Shows as Collect Stick on the list at first.'},
+      {n:'Catch Fish', t:'long', st:[{r:['Dock'], d:'catch 3 fish', s:[8,15], est:true},{r:['Kitchen'], d:'cook both sides', s:[20,23]}], tip:'Stage 2 shows as Cook Fish on the list.'},
+      {n:'Collect Vegetables', t:'long', st:[{r:['Greenhouse'], d:'pull 3 vegetables', s:[4,6], est:true},{r:['Kitchen'], d:'chop them', s:[4,6], est:true}], tip:'Stage 2 shows as Prep Vegetables on the list.'},
+      {n:'Extract Fuel', t:'long', st:[{r:['Upper Engine'], s:[5,7]},{r:['Storage'], s:[5,7]}]},
+      {n:'Help Critter', t:'long', st:[{r:['Jungle'], d:'find the egg', s:[3,5], est:true},{r:['Laboratory'], d:'hatch it, then feed it', s:[32,36]}], tip:'The egg takes 30 seconds to hatch in the Laboratory.'},
+      {n:'Hoist Supplies', t:'long', st:[{r:['Jungle'], d:'pull the rope', s:[3,5], est:true},{r:['The Cliffs'], d:'pull the rope', s:[3,5], est:true}]},
+      {n:'Mine Ores', t:'long', st:[{r:['Mining Pit'], s:[4,6], est:true}]},
+      {n:'Polish Gem', t:'long', st:[{r:['Mining Pit'], s:[5,8], est:true}]},
+      {n:'Replace Water Jug', t:'long', st:[{r:['Storage'], d:'fill the jug', s:[4,6], est:true},{r:['Cafeteria'], d:'swap the jug', s:[4,6], est:true}]},
+      {n:'Water Plants', t:'long', st:[{r:['Storage'], d:'grab the can', s:[1,2], est:true},{r:['Greenhouse'], d:'water 4 plants', s:[4,6], est:true}]},
+      {n:'Assemble Artifact', t:'short', st:[{r:['Laboratory'], s:[5,8]}]},
+      {n:'Build Sandcastle', t:'short', st:[{r:['Splash Zone'], s:[2,3], est:true}]},
+      {n:'Collect Shells', t:'short', st:[{r:['Beach','Splash Zone'], pick:true, ask:'Does your list say Beach or Splash Zone?', s:[4,6], est:true}]},
+      {n:'Crank Generator', t:'short', st:[{r:['Kitchen','Communications'], pick:true, ask:'Does your list say Kitchen or Communications?', s:[3,5], est:true}]},
+      {n:'Empty Garbage', t:'short', st:[{r:['Cafeteria','Splash Zone'], pick:true, ask:'Does your list say Cafeteria or Splash Zone?', s:[3,4]}], tip:'Not a visual task on this map.'},
+      {n:'Find Signal', t:'short', st:[{r:['Communications'], s:[3,6], est:true}]},
+      {n:'Fix Antenna', t:'short', st:[{r:['Communications'], s:[2,4], est:true}]},
+      {n:'Fix Wiring', t:'short', st:[{r:['Communications','Dropship'], pick:true, ask:'Does your list say Communications or Dropship?', s:[4,5]}], tip:'Only one panel on this map, and it is not a common task here.'},
+      {n:'Lift Weights', t:'short', st:[{r:['Splash Zone'], s:[4,6], est:true}]},
+      {n:'Monitor Mushroom', t:'short', st:[{r:['Jungle'], s:[4,6], est:true}]},
+      {n:'Play Video Game', t:'short', st:[{r:['The Dorm'], s:null}], tip:'The Fungle\'s version of Clear Asteroids. Not visual here.'},
+      {n:'Record Temperature', t:'short', st:[{r:['Greenhouse','Laboratory','Reactor'], pick:true, ask:'Which room does your list name?', s:[3,5], est:true}]},
+      {n:'Throw Frisbee', t:'short', st:[{r:['Splash Zone'], s:[2,3], est:true}]}
+    ]
+  }
+};
+/*__MAPS_END__*/
+
+/* =====================================================================
+   2. STATE
+   Everything the page knows lives in one object. Every change goes
+   through an action, then save() and render(). Nothing else mutates it.
+   ===================================================================== */
+const STORE_KEY = 'sus-tracker-v1';
+const uid = () => Math.random().toString(36).slice(2, 10);
+let state = null;
+
+function newGame(prev) {
+  const p = prev || {};
+  return {
+    v: 1,
+    mode: p.mode || 'crew',
+    map: p.map || 'skeld',
+    lobby: p.lobby ? p.lobby.slice() : ['red','blue','green','pink','orange','yellow','black','white','purple','lime'],
+    names: p.names ? {...p.names} : {},
+    me: p.me || 'lime',
+    imps: p.imps || 2,
+    settings: p.settings ? {...p.settings} : {visual: true, bar: 'always', confirm: true},
+    awake: false,
+    players: {},
+    phase: 'tasks', round: 1, meetings: 0,
+    log: [], fakes: {}, impOverride: null, routeFrom: null,
+    tab: p.tab || 'players', logFilter: 'all',
+    example: false, started: Date.now()
+  };
+}
+
+function exampleGame() {
+  const g = newGame();
+  g.example = true;
+  g.names = {red: 'Sam', purple: 'Jordan', yellow: 'Alex'};
+  const now = Date.now(), ago = m => now - m * 60000;
+  g.players = {
+    orange: {s: 'safe'}, blue: {s: 'dead', body: 'Electrical'}, purple: {s: 'sus'},
+    white: {s: 'ejected', ejImp: false}
+  };
+  g.round = 3; g.meetings = 2;
+  const L = (m, ph, k, who, room, text) => ({id: uid(), t: ago(m), ph, k, who, room, text});
+  g.log = [
+    L(11, 'R1', 'seen', 'purple', 'Electrical'),
+    L(10.6, 'R1', 'seen', 'red', 'MedBay'),
+    L(10, 'R1', 'visual', 'orange', null, 'Watched them finish Submit Scan'),
+    L(9.4, 'R1', 'seen', 'blue', 'Electrical'),
+    L(8.8, 'R1', 'body', 'blue', 'Electrical'),
+    L(8.7, 'M1', 'meet', null, null, 'Meeting 1 called'),
+    L(8.4, 'M1', 'claim', 'purple', null, 'Says they were in Navigation doing Chart Course'),
+    L(8.2, 'M1', 'claim', 'red', null, 'Saw Purple walk out of Electrical'),
+    L(8.0, 'M1', 'claim', 'white', null, 'Accused Red, no evidence'),
+    L(7.6, 'M1', 'status', 'white', null, 'Ejected (not an impostor)'),
+    L(7.5, 'R2', 'round', null, null, 'Back to tasks'),
+    L(5.2, 'R2', 'seen', 'purple', 'Navigation'),
+    L(4.6, 'R2', 'seen', 'green', 'Admin'),
+    L(3.1, 'M2', 'meet', null, null, 'Meeting 2 called'),
+    L(2.8, 'M2', 'note', null, null, 'Nobody found a body. Green called it on Purple.'),
+    L(2.2, 'R3', 'round', null, null, 'Back to tasks'),
+    L(1.0, 'R3', 'seen', 'yellow', 'Weapons')
+  ];
+  return g;
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return s && s.v === 1 ? s : null;
+  } catch (e) { return null; }
+}
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked: the page still works for this visit */ }
+}
+function P(id) {
+  if (!state.players[id]) state.players[id] = {s: 'unknown'};
+  return state.players[id];
+}
+const phaseKey = () => state.phase === 'meeting' ? 'M' + state.meetings : 'R' + state.round;
+function addLog(k, fields) {
+  state.log.push({id: uid(), t: Date.now(), ph: phaseKey(), k, ...fields});
+}
+
+/* =====================================================================
+   3. PURE HELPERS (no DOM). critInfo is the vote math.
+   ===================================================================== */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const plural = (n, one, many) => n === 1 ? one : (many || one + 's');
+const nameOf = id => state.names[id] ? state.names[id] : (COLOR[id] ? COLOR[id].name : id);
+const fullName = id => state.names[id] ? `${state.names[id]} (${COLOR[id].name})` : COLOR[id].name;
+const map = () => MAPS[state.map];
+const isGone = id => ['dead','ejected'].includes(P(id).s);
+const fmtClock = t => new Date(t).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+function fmtAgo(t) {
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  return Math.floor(m / 60) + 'h ago';
+}
+function fmtSecs(s) {
+  if (s == null) return 'varies';
+  if (Array.isArray(s)) return `${s[0]}–${s[1]}s`;
+  return `${s}s`;
+}
+const phaseName = ph => (ph[0] === 'M' ? 'Meeting ' : 'Round ') + ph.slice(1);
+
+/* The vote math.
+   Impostors win the moment they are at least as many as the crew.
+   gap = crew alive - impostors alive = kills they still need.
+   Each impostor can kill once a round, so when gap <= impostors alive,
+   one kill each before the next meeting ends the game. That is "crit". */
+function critInfo(s) {
+  let alive = 0, ejImp = 0, ejUnknown = 0;
+  for (const id of s.lobby) {
+    const p = s.players[id] || {s: 'unknown'};
+    if (p.s === 'dead') continue;
+    if (p.s === 'ejected') {
+      if (p.ejImp === true) ejImp++;
+      else if (p.ejImp == null) ejUnknown++;
+      continue;
+    }
+    alive++;
+  }
+  let hi = Math.max(0, s.imps - ejImp);
+  let lo = Math.max(0, hi - ejUnknown);
+  if (s.impOverride != null) { hi = lo = s.impOverride; }
+  hi = Math.min(hi, alive); lo = Math.min(lo, hi);
+  const imp = hi;                 /* plan for the worst case */
+  const crew = alive - imp;
+  const gap = crew - imp;
+  const out = {alive, lo, hi, imp, crew, gap, unsure: lo !== hi};
+  const crewSide = s.mode === 'crew';
+
+  if (imp <= 0) return {...out, level: 'over', pill: 'Crew wins', title: 'No impostors left', body: 'If your marks are right, the crew has already won. Check the players you marked as ejected.'};
+  if (gap <= 0) return {...out, level: 'over', pill: 'Game over', title: 'Impostors have the numbers', body: 'With this many impostors alive the game should already be over. Check who you marked dead or ejected.'};
+
+  const kills = `${gap} more ${plural(gap, 'kill')}`;
+  if (crewSide) {
+    if (gap <= imp) return {...out, level: 'crit', pill: "Don't skip", title: 'Crit. Vote someone out.',
+      body: imp === 1 || gap === 1
+        ? 'One more kill ends the game, so a skip hands it to them. Vote your best read.'
+        : `Impostors need ${kills}, and ${imp} of them can each kill before the next meeting. A skip hands them the game. Vote your best read.`};
+    if (gap === imp + 1) return {...out, level: 'warn', pill: 'Careful', title: 'Only vote with a real case',
+      body: 'Skipping is fine here. A wrong eject puts the crew at crit, where the next skip loses the game.'};
+    return {...out, level: 'ok', pill: 'Safe to skip', title: 'Skip unless someone has proof',
+      body: `Impostors need ${kills}. A wrong eject is a free kill for them, so skip when nobody has real evidence.`};
+  }
+  if (gap === 1) return {...out, level: 'win', pill: '1 to win', title: 'One kill from winning',
+    body: 'Push for a skip. If they vote out a crewmate instead, you win on the spot.'};
+  if (gap <= imp) return {...out, level: 'win', pill: `${gap} to win`, title: 'You can win this round',
+    body: `You need ${kills} and have ${imp} impostors who can each kill before the next meeting. Push for a skip.`};
+  if (gap === imp + 1) return {...out, level: 'warn', pill: `${gap} to win`, title: 'Close to winning range',
+    body: 'One wrong eject puts you in winning range. Back a weak accusation instead of starting one.'};
+  return {...out, level: 'ok', pill: `${gap} to win`, title: 'Keep the votes split',
+    body: `You need ${kills}. Every crewmate they vote out counts as a free kill.`};
+}
+
+/* last place we have for a player: a sighting, a body, or a visual task */
+function lastSeen(id) {
+  for (let i = state.log.length - 1; i >= 0; i--) {
+    const e = state.log[i];
+    if (e.who === id && (e.k === 'seen' || e.k === 'body' || (e.k === 'saw' && e.room))) return e;
+  }
+  return null;
+}
+
+/* task helpers */
+const taskByName = n => (map().tasks || []).find(t => t.n === n);
+const isVisualTask = t => t.st.some(x => x.vis);
+const commons = () => (map().tasks || []).filter(t => t.t === 'common');
+const visuals = () => (map().tasks || []).filter(isVisualTask);
+function fakeSeconds(stage) {
+  if (stage.s == null) return 8;
+  if (Array.isArray(stage.s)) return Math.round((stage.s[0] + stage.s[1]) / 2 * 2) / 2;
+  return stage.s;
+}
+const orList = a => a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1];
+const ORD = ['1st', '2nd', '3rd', '4th'];
+
+/* Where a step happens. key is what we stored for that step: a room name,
+   or for Fix Wiring the panel's position in t.panels. */
+function stageRoom(t, i, key) {
+  const st = t.st[i];
+  if (st.wire) return key != null ? t.panels[key] : null;
+  if (key) return key;
+  return st.r.length === 1 ? st.r[0] : null;
+}
+/* "Admin: upload", or every possible room when it isn't settled yet */
+function stageLabel(t, i, key) {
+  const st = t.st[i];
+  const room = stageRoom(t, i, key) || (st.wire ? `${ORD[i]} panel` : st.any || orList(st.r));
+  return st.d ? `${room}: ${st.d}` : room;
+}
+/* the stored choice for a step, following "pair" steps from the step before */
+function resolvedKey(t, f, i) {
+  const st = t.st[i];
+  if (f && f.room[i] != null) return f.room[i];
+  if (st.pair && f) {
+    const k = t.st[i - 1].r.indexOf(resolvedKey(t, f, i - 1));
+    if (k >= 0) return st.r[k];
+  }
+  return null;
+}
+function chainText(t) { return t.st.map((x, i) => stageLabel(t, i)).join(' → '); }
+
+/* ---- Route planning ----
+   Each room has a position from the game files. Distance is a straight line,
+   except rooms behind a gate (decontamination, a ladder) are measured
+   through that spot. The planner then walks a greedy loop: from where you
+   are, always go to the closest step you're allowed to do next. */
+const WALK = 2.4;   /* rough walking speed, in map units per second */
+function dist(m, a, b) {
+  if (!a || !b || a === b) return 0;
+  const A = m.pos[a], B = m.pos[b];
+  if (!A || !B) return 25;
+  const ga = m.gate[a], gb = m.gate[b];
+  const pts = [A];
+  if (ga && ga !== gb && ga !== b) pts.push(m.pos[ga]);
+  if (gb && gb !== ga && gb !== a) pts.push(m.pos[gb]);
+  pts.push(B);
+  let d = 0;
+  for (let k = 1; k < pts.length; k++) d += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+  return d;
+}
+/* the rooms a task's next step could happen in, as [{room, key}] */
+function stepOptions(t, i, rooms) {
+  const st = t.st[i];
+  if (st.wire) {
+    if (rooms[i] != null) return [{room: t.panels[rooms[i]], key: rooms[i]}];
+    const prev = i === 0 ? -1 : rooms[i - 1];
+    const left = t.st.length - i;                /* panels still needed, this one included */
+    const out = [];
+    for (let j = prev + 1; j <= t.panels.length - left; j++) out.push({room: t.panels[j], key: j});
+    return out;
+  }
+  if (rooms[i] != null) return [{room: rooms[i], key: rooms[i]}];
+  if (st.pair) {
+    const k = t.st[i - 1].r.indexOf(rooms[i - 1]);
+    if (k >= 0) return [{room: st.r[k], key: st.r[k]}];
+  }
+  return st.r.map(r => ({room: r, key: r}));
+}
+/* Try the greedy walk many times with a little random wobble in the costs,
+   and keep the shortest. The random numbers come from a fixed seed, so the
+   same task list always gives the same route instead of reshuffling. */
+function planRoute(m, fakes, from, now) {
+  let seed = 1234567;
+  const rng = () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  let best = null;
+  for (let k = 0; k < 80; k++) {
+    const run = planOnce(m, fakes, from, now, k === 0 ? () => 0 : rng);
+    if (!best || run.total < best.total - 0.01) best = run;
+  }
+  return best.steps;
+}
+function planOnce(m, fakes, from, now, rng) {
+  const work = Object.keys(fakes).map(n => {
+    const t = (m.tasks || []).find(x => x.n === n), f = fakes[n];
+    if (!t) return null;
+    return {t, f, next: f.done.findIndex(d => !d), rooms: f.room.slice(),
+      ready: f.readyAt ? Math.max(0, (f.readyAt - now) / 1000) : 0, skip: f.skip || 0};
+  }).filter(w => w && w.next >= 0);
+  const steps = [];
+  let cur = from, clock = 0;
+  for (let guard = 0; guard < 150; guard++) {
+    let best = null;
+    for (const w of work) {
+      if (w.next < 0) continue;
+      for (const o of stepOptions(w.t, w.next, w.rooms)) {
+        const travel = dist(m, cur, o.room);
+        const wait = Math.max(0, w.ready - (clock + travel / WALK));
+        /* crewmates grab common tasks early; "Not now" pushes a task back */
+        const cost = (travel + wait * WALK * 1.5) * (1 + rng() * 0.8) + w.skip * 40 - (w.t.t === 'common' ? 3 : 0);
+        if (!best || cost < best.cost) best = {w, o, travel, wait, cost};
+      }
+    }
+    if (!best) break;
+    const {w, o, travel, wait} = best, i = w.next, st = w.t.st[i];
+    const secs = fakeSeconds(st);
+    steps.push({t: w.t, i, room: o.room, key: o.key, secs, walk: travel / WALK, wait});
+    clock += travel / WALK + wait + secs;
+    w.rooms[i] = o.key;
+    w.ready = st.wait ? clock + st.wait : 0;
+    w.skip = 0;
+    w.next = i + 1 < w.t.st.length ? i + 1 : -1;
+    cur = o.room;
+  }
+  /* skipped tasks count as extra distance, so "Not now" really moves them later */
+  return {steps, total: clock + work.reduce((a, w) => a + (w.f.skip || 0) * 40, 0)};
+}
+/* back-to-back steps in the same room become one stop */
+function toStops(steps) {
+  const stops = [];
+  for (const s of steps) {
+    const last = stops[stops.length - 1];
+    if (last && last.room === s.room && !s.wait) last.steps.push(s);
+    else stops.push({room: s.room, steps: [s]});
+  }
+  return stops;
+}
+function routeStart() {
+  const m = map();
+  if (state.routeFrom && m.pos[state.routeFrom]) return state.routeFrom;
+  return state.meetings > 0 ? m.meet : m.spawn;
+}
+function timeText(t) {
+  const parts = t.st.map(x => fmtSecs(x.s) + (x.est && x.s != null ? '*' : ''));
+  const unique = [...new Set(parts)];
+  let txt = t.st.length > 1 && unique.length === 1 ? `${unique[0]} each` : parts.join(' + ');
+  const wait = t.st.reduce((a, x) => a + (x.wait || 0), 0);
+  if (wait) txt += ` + ${wait}s wait`;
+  return txt;
+}
+
+/* =====================================================================
+   4. RENDERING. Each view is a function that returns an HTML string.
+   ===================================================================== */
+const $ = sel => document.querySelector(sel);
+const ICON = {
+  players: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="8" r="3"/><circle cx="17" cy="8" r="3"/><circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/></svg>',
+  meeting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 10v4h4l6 4V6L7 10z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11" stroke-linecap="round"/></svg>',
+  tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M4 20l2 2 3-3M13 6h7M13 13h7M13 20h7"/></svg>',
+  log: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  setup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+  horn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M3 10v4h4l6 4V6L7 10z"/></svg>'
+};
+const TABS = [['players','Players'],['meeting','Meeting'],['tasks','Tasks'],['log','Log'],['setup','Setup']];
+const STATUS = {
+  unknown: {crew: 'Unknown', imp: 'Unknown'},
+  safe: {crew: 'Cleared', imp: 'Trusts you'},
+  sus: {crew: 'Sus', imp: 'Onto you'},
+  dead: {crew: 'Dead', imp: 'Dead'},
+  ejected: {crew: 'Ejected', imp: 'Ejected'}
+};
+const statusLabel = s => STATUS[s][state.mode];
+const swatch = (id, cls = '') => `<span class="sw ${cls}" style="--c:${COLOR[id].hex}" aria-hidden="true"></span>`;
+
+function render() {
+  $('#app').dataset.mode = state.mode;
+  renderChrome();
+  renderDock();
+  const views = {players: viewPlayers, meeting: viewMeeting, tasks: viewTasks, log: viewLog, setup: viewSetup};
+  $('#view').innerHTML = (views[state.tab] || viewPlayers)();
+  if (sheetFor) renderSheet();
+  else if (picking) renderPicker();
+  else if (helpOpen) renderHelp();
+  afterRender();
+}
+
+function renderChrome() {
+  const c = critInfo(state);
+  const inMeeting = state.phase === 'meeting';
+  const crewBlocks = Array.from({length: Math.max(0, c.crew)}, () => '<i></i>').join('');
+  const impBlocks = Array.from({length: Math.max(0, c.imp)}, () => '<i class="x"></i>').join('');
+  $('#chrome').innerHTML = `
+    <div class="top-row">
+      <div class="brand"><span class="light" aria-hidden="true"></span>Sus Tracker</div>
+      <div class="mode"><div class="seg" role="group" aria-label="Your role this game">
+        <button type="button" data-action="setMode" data-v="crew" aria-pressed="${state.mode === 'crew'}">Crewmate</button>
+        <button type="button" data-action="setMode" data-v="imp" aria-pressed="${state.mode === 'imp'}">Impostor</button>
+      </div></div>
+    </div>
+    <div class="top-row">
+      <div class="phase"><span class="phase-label">${esc(phaseName(phaseKey()))}</span><span class="mapchip">${esc(map().name)}</span></div>
+      <button type="button" class="meet ${inMeeting ? 'back' : ''}" data-action="meeting">${inMeeting ? 'Back to tasks' : ICON.horn + 'Meeting called'}</button>
+    </div>
+    <button type="button" class="crit lvl-${c.level}" data-action="tab" data-v="meeting" aria-label="${esc(c.title)}. Open the meeting view.">
+      <span class="crit-txt"><b>${c.alive}</b> alive · <b>${c.unsure ? c.lo + '–' + c.hi : c.hi}</b> ${plural(c.hi, 'imp')}</span>
+      <span class="tug" aria-hidden="true">${crewBlocks}${impBlocks}</span>
+      <span class="pill">${esc(c.pill)}</span>
+    </button>`;
+}
+
+function renderDock() {
+  const sus = state.lobby.filter(id => P(id).s === 'sus' && !isGone(id)).length;
+  $('#dock').innerHTML = TABS.map(([id, label]) => `
+    <button type="button" data-action="tab" data-v="${id}" ${state.tab === id ? 'aria-current="page"' : ''}>
+      ${ICON[id]}<span>${label}</span>${id === 'players' && sus ? `<span class="badge" aria-label="${sus} sus">${sus}</span>` : ''}
+    </button>`).join('');
+}
+
+function exampleBanner() {
+  if (!state.example) return '';
+  return `<div class="banner"><p><b>This is an example game</b> so you can see how it works. Start a fresh one when you're in a lobby.</p>
+    <button type="button" class="btn" data-action="freshFromExample">Start fresh</button></div>`;
+}
+
+/* ---- Players ---- */
+function playerCard(id) {
+  const p = P(id), seen = lastSeen(id);
+  const gone = isGone(id);
+  const cls = ['pcard', gone ? 'is-gone' : '', p.s === 'sus' ? 'is-sus' : '', p.s === 'safe' ? 'is-safe' : '',
+    state.mode === 'imp' && p.partner ? 'is-partner' : ''].join(' ');
+  const tags = [];
+  if (id === state.me) tags.push('<span class="tag you">You</span>');
+  if (state.mode === 'imp' && p.partner) tags.push('<span class="tag partner">Partner</span>');
+  if (p.s !== 'unknown') tags.push(`<span class="tag st-${p.s}">${esc(statusLabel(p.s))}</span>`);
+  if (p.s === 'ejected' && p.ejImp === true) tags.push('<span class="tag bad">Impostor</span>');
+  let seenTxt = 'Not seen yet';
+  if (p.s === 'dead') seenTxt = p.body ? `Body: ${p.body}` : 'Dead';
+  else if (seen) seenTxt = `${seen.room} · ${phaseName(seen.ph)} · ${fmtAgo(seen.t)}`;
+  return `<button type="button" class="${cls}" data-action="openPlayer" data-v="${id}">
+      ${swatch(id)}
+      <span class="pname">${esc(nameOf(id))}</span>
+      <span class="pline">${state.names[id] ? `<span class="tag">${COLOR[id].name}</span>` : ''}${tags.join('')}</span>
+      <span class="pseen">${esc(seenTxt)}</span>
+    </button>`;
+}
+
+function viewPlayers() {
+  const order = [state.me, ...state.lobby.filter(id => id !== state.me)].filter(id => state.lobby.includes(id));
+  const live = order.filter(id => !isGone(id)), gone = order.filter(id => isGone(id));
+  const recent = state.log.slice(-4).reverse();
+  return `${exampleBanner()}
+    <section class="card">
+      <div class="card-head"><h2>Players</h2><span class="sub">Tap a player to mark them or log where you saw them</span></div>
+      <div class="grid">${live.map(playerCard).join('')}</div>
+      ${gone.length ? `<p class="eyebrow" style="margin:14px 0 8px">Dead or ejected</p><div class="grid">${gone.map(playerCard).join('')}</div>` : ''}
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Latest</h2><button type="button" class="btn ghost sm" data-action="tab" data-v="log">Full log</button></div>
+      ${recent.length ? `<ul class="events">${recent.map(eventRow).join('')}</ul>` : '<p class="empty">Nothing logged yet. Tap a player, then the room you saw them in.</p>'}
+    </section>`;
+}
+
+/* ---- Player sheet ---- */
+let sheetFor = null;
+function renderSheet() {
+  const id = sheetFor, p = P(id), m = map();
+  const isMe = id === state.me;
+  const statuses = ['unknown','safe','sus','dead','ejected'];
+  const needsBody = p.s === 'dead' && !p.body;
+  const showVisual = state.mode === 'crew' && state.settings.visual && visuals().length && !isGone(id) && !isMe;
+  const history = state.log.filter(e => e.who === id).slice(-6).reverse();
+  $('#sheet').innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-head">${swatch(id, 'lg')}<h2 id="sheet-title">${esc(fullName(id))}${isMe ? ' · You' : ''}</h2>
+        <button type="button" class="x" data-action="closeSheet" aria-label="Close">×</button></div>
+      <div class="sec"><h3>Mark as</h3><div class="opts">
+        ${statuses.map(s => `<button type="button" class="opt o-${s}" data-action="setStatus" data-v="${s}" aria-pressed="${p.s === s}">${esc(statusLabel(s))}</button>`).join('')}
+      </div></div>
+      ${p.s === 'ejected' ? `<div class="sec"><h3>Were they an impostor?</h3><div class="opts">
+        <button type="button" class="opt" data-action="setEjImp" data-v="yes" aria-pressed="${p.ejImp === true}">Yes</button>
+        <button type="button" class="opt" data-action="setEjImp" data-v="no" aria-pressed="${p.ejImp === false}">No</button>
+        <button type="button" class="opt" data-action="setEjImp" data-v="unk" aria-pressed="${p.ejImp == null}">Not shown</button>
+      </div><p class="hint" style="margin-top:6px">With confirm ejects off, leave this on "Not shown" and the vote check plans for the worst case.</p></div>` : ''}
+      ${state.mode === 'imp' && !isMe ? `<div class="sec"><h3>Your team</h3><div class="opts">
+        <button type="button" class="opt" data-action="togglePartner" aria-pressed="${!!p.partner}">${p.partner ? 'Impostor partner' : 'Mark as my partner'}</button></div></div>` : ''}
+      ${showVisual ? `<div class="sec"><button type="button" class="btn ghost" data-action="sawVisual">I watched them finish a visual task</button></div>` : ''}
+      ${p.s !== 'ejected' && (!isGone(id) || needsBody) ? `<div class="sec"><h3>${needsBody ? 'Body found in' : 'Seen in'}</h3>
+        <div class="rooms">${m.rooms.map(r => `<button type="button" class="room" data-action="logRoom" data-v="${esc(r)}">${esc(r)}</button>`).join('')}</div></div>` : ''}
+      <div class="sec"><h3>Note</h3>
+        <form class="row" data-form="playerNote"><input type="text" id="pnote" placeholder="Something about ${esc(nameOf(id))}" autocomplete="off" maxlength="160"><button class="btn" type="submit">Add</button></form></div>
+      <div class="sec"><h3>History</h3>${history.length ? `<ul class="mini-log">${history.map(e => `<li>${esc(phaseName(e.ph))} · ${esc(eventText(e))}</li>`).join('')}</ul>` : '<p class="empty">Nothing logged for this player yet.</p>'}</div>
+    </div>`;
+  $('#sheet').hidden = false;
+}
+
+/* ---- Meeting ---- */
+function viewMeeting() {
+  const c = critInfo(state);
+  const crewSide = state.mode === 'crew';
+  const alive = state.lobby.filter(id => !isGone(id));
+  const rank = {sus: 0, unknown: 1, safe: 2};
+  alive.sort((a, b) => (rank[P(a).s] ?? 1) - (rank[P(b).s] ?? 1));
+  const dead = state.lobby.filter(id => P(id).s === 'dead');
+  const ph = phaseKey();
+  const claimsNow = state.log.filter(e => e.k === 'claim' && e.ph === ph);
+  const lastRound = 'R' + (state.phase === 'meeting' ? state.meetings : state.round);
+  const story = state.log.filter(e => (e.k === 'fake' || e.k === 'mine') && (e.ph === lastRound || e.ph === ph));
+  const stepper = `<div class="stepper" role="group" aria-label="Adjust impostors left">
+      <button type="button" data-action="impAdj" data-v="-1" aria-label="One fewer impostor">−</button>
+      <button type="button" data-action="impAdj" data-v="1" aria-label="One more impostor">+</button>
+      ${state.impOverride != null ? '<button type="button" class="auto" data-action="impAuto">Auto</button>' : ''}</div>`;
+  const tipsCrew = [
+    'Say where you were, what you did, and who you saw. Specific claims can be checked.',
+    'Ask whoever reported where the body was and who was nearby.',
+    `Common tasks are the same for everyone${commons().length ? ` (${commons().map(t => t.n).join(', ')})` : ''}. If one isn't on your list, anyone claiming it is lying.`,
+    c.level === 'crit' ? 'This is crit. Skipping loses. Vote your best read.' : 'No real evidence? Skip. A wrong eject is a free kill for them.'
+  ];
+  const tipsImp = [
+    'Back up someone else\'s suspicion before you start one of your own.',
+    'Keep your story short and match it to the tasks you faked below.',
+    'Never claim a common task the crew doesn\'t have, or a room across the map from where you were seen.',
+    c.level === 'win' ? 'You are in winning range. Push for a skip.' : 'A crewmate voted out is as good as a kill.'
+  ];
+  return `${exampleBanner()}
+    <section class="verdict lvl-${c.level}" aria-live="polite">
+      <div class="v-top"><span class="eyebrow">${crewSide ? 'Vote check' : 'Win check'}</span><span class="pill lvl-${c.level}">${esc(c.pill)}</span></div>
+      <h2 class="v-title">${esc(c.title)}</h2>
+      <p class="v-body">${esc(c.body)}</p>
+      <div class="stats">
+        <div class="stat"><b>${c.alive}</b><span>alive</span></div>
+        <div class="stat"><b>${c.unsure ? c.lo + '–' + c.hi : c.hi}</b><span>impostors left</span>${stepper}</div>
+        <div class="stat"><b>${Math.max(0, c.gap)}</b><span>kills they need</span></div>
+      </div>
+      ${c.unsure ? '<p class="hint">Some ejects weren\'t confirmed, so this plans for the worst case.</p>' : ''}
+      ${state.impOverride != null ? '<p class="hint">You set the impostor count by hand. Tap Auto to go back to counting from your marks.</p>' : ''}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Where everyone was</h2><span class="sub">Sus first</span></div>
+      <ul class="wlist">${alive.map(id => {
+        const s = lastSeen(id), p = P(id);
+        return `<li>${swatch(id, 'sm')}<div class="meta"><span class="who">${esc(nameOf(id))}${id === state.me ? ' · You' : ''}</span>
+          <span class="where">${s ? esc(`${s.room} · ${phaseName(s.ph)}`) : 'not seen'}</span></div>
+          ${p.s !== 'unknown' ? `<span class="tag st-${p.s}">${esc(statusLabel(p.s))}</span>` : (state.mode === 'imp' && p.partner ? '<span class="tag partner">Partner</span>' : '<span></span>')}</li>`;
+      }).join('')}</ul>
+      ${dead.length ? `<p class="eyebrow" style="margin:12px 0 6px">Bodies</p><ul class="wlist">${dead.map(id => `<li>${swatch(id, 'sm')}<div class="meta"><span class="who">${esc(nameOf(id))}</span><span class="where">${esc(P(id).body || 'location not logged')}</span></div><span></span></li>`).join('')}</ul>` : ''}
+    </section>
+
+    ${crewSide ? '' : `<section class="card">
+      <div class="card-head"><h2>Your story</h2><span class="sub">Keep it consistent</span></div>
+      ${story.length ? `<ul class="events">${story.map(eventRow).join('')}</ul>` : '<p class="empty">Tasks you fake on the Tasks tab show up here, so your story matches what you did.</p>'}
+      <form class="row" data-form="story" style="margin-top:10px"><input type="text" id="story-input" placeholder="What I'll say I did" autocomplete="off" maxlength="160"><button class="btn" type="submit">Add</button></form>
+    </section>`}
+
+    <section class="card">
+      <div class="card-head"><h2>Claims</h2><span class="sub">${state.phase === 'meeting' ? 'This meeting' : 'Logged during meetings'}</span></div>
+      <div class="pickrow" role="group" aria-label="Who is talking">${alive.filter(id => id !== state.me).map(id => `<button type="button" class="pick" data-action="pickClaim" data-v="${id}" aria-pressed="${claimWho === id}">${swatch(id, 'sm')}${esc(nameOf(id))}</button>`).join('')}</div>
+      <form class="row" data-form="claim"><input type="text" id="claim-input" placeholder="${claimWho ? `What ${esc(nameOf(claimWho))} says` : 'Pick a player, then type'}" autocomplete="off" maxlength="160"><button class="btn" type="submit">Log</button></form>
+      ${claimsNow.length ? `<ul class="events" style="margin-top:10px">${claimsNow.slice().reverse().map(eventRow).join('')}</ul>` : ''}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>${crewSide ? 'Before you vote' : 'Meeting moves'}</h2></div>
+      <ul class="tips">${(crewSide ? tipsCrew : tipsImp).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    </section>`;
+}
+let claimWho = null;
+
+/* ---- Tasks ---- */
+function viewTasks() {
+  const m = map(), crewSide = state.mode === 'crew', st = state.settings;
+  const cm = commons(), vs = visuals();
+  const barLive = st.bar === 'always';
+  const tasks = m.tasks || [];
+  const byType = {common: [], long: [], short: []};
+  tasks.forEach(t => (byType[t.t] || byType.short).push(t));
+
+  const facts = `
+    <div><dt>Common tasks</dt><dd><div class="chips">${cm.map(t => `<span class="chip">${esc(t.n)}</span>`).join('') || '<span class="hint">None</span>'}</div>
+      <p class="hint">${crewSide ? "Everyone gets the same common tasks. If one isn't on your list, nobody has it." : 'Everyone has these, so fake them early where people can see you.'}</p></dd></div>
+    <div><dt>Visual tasks</dt><dd><div class="chips">${vs.map(t => `<span class="chip vis">${esc(t.n)}</span>`).join('') || '<span class="hint">None on this map</span>'}</div>
+      <p class="hint">${!vs.length ? 'Nobody can prove they are crew with a task here.' : !st.visual ? 'Visual tasks are off this game, so they prove nothing.' : crewSide ? 'Watching someone finish one clears them. Not seeing it proves nothing if the setting is off.' : 'Never fake these while visual tasks are on.'}</p></dd></div>
+    ${m.upload ? `<div><dt>Download / Upload</dt><dd><p>Download in the room on your list, then upload in <b>${esc(m.upload)}</b>.</p></dd></div>` : ''}
+    ${m.critical && m.critical.length ? `<div><dt>Critical sabotage</dt><dd>${m.critical.map(x => `<p><b>${esc(x.name)}</b>: ${esc(x.fix)}${x.secs ? ` (${x.secs}s)` : ''}</p>`).join('')}</dd></div>` : ''}
+    ${m.sabotage && m.sabotage.length ? `<div><dt>Other sabotages</dt><dd>${m.sabotage.map(x => `<p>${esc(x)}</p>`).join('')}</dd></div>` : ''}
+    ${m.dummies && m.dummies.length ? `<div><dt>Fake panels</dt><dd>${m.dummies.map(x => `<p>${esc(x)}</p>`).join('')}<p class="hint">${crewSide ? 'Anyone "using" one of these is faking.' : 'Never stand at one of these.'}</p></dd></div>` : ''}
+    <div><dt>Task bar</dt><dd><p class="hint">${barLive
+      ? (crewSide ? 'Updates live. Watch it when someone finishes a one-step task in front of you.' : "Updates live. The last step of a task is what fills it, so fake last steps when nobody's watching, or sabotage Comms first to hide the bar.")
+      : (crewSide ? "Doesn't update live, so you can't check anyone with it. Timing still works." : "Doesn't move live, so nobody can check you with it. Timing still matters.")}</p></dd></div>`;
+
+  const toggles = `<div class="toggles" style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px dashed var(--line)">
+    <div class="toggle-row"><span>Visual tasks</span><div class="seg" role="group" aria-label="Visual tasks">
+      <button type="button" data-action="setSetting" data-v="visual:1" aria-pressed="${st.visual}">On</button>
+      <button type="button" data-action="setSetting" data-v="visual:0" aria-pressed="${!st.visual}">Off</button></div></div>
+    <div class="toggle-row"><span>Task bar updates</span><div class="seg" role="group" aria-label="Task bar updates">
+      ${['always','meetings','never'].map(v => `<button type="button" data-action="setSetting" data-v="bar:${v}" aria-pressed="${st.bar === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div>
+  </div>`;
+
+  const timedStages = [];
+  tasks.forEach(t => t.st.forEach((x, i) => { if (x.s != null) timedStages.push({t, x, i}); }));
+  const watchCard = `<section class="card">
+    <div class="card-head"><h2>Faker check</h2><span class="sub">Time how long someone stands at a panel</span></div>
+    <label class="lbl" for="watch-task">Task they're doing</label>
+    <select id="watch-task">${timedStages.map(({t, x, i}) => `<option value="${esc(t.n)}|${i}" ${watchSel === t.n + '|' + i ? 'selected' : ''}>${esc(t.n)}${t.st.length > 1 ? ` (step ${i + 1})` : ''} · ${fmtSecs(x.s)}${x.est ? ' approx.' : ''}</option>`).join('')}</select>
+    <div class="watch-face"><span class="watch-num" id="watch-num">${watch.elapsed.toFixed(1)}</span><span class="sub">sec</span></div>
+    <button type="button" class="btn big" data-action="watchToggle" id="watch-btn">${watch.running ? 'Stop' : 'Start timing'}</button>
+    ${watch.verdict ? `<p class="out lvl-${watch.verdict.lvl}">${esc(watch.verdict.text)}</p>` : '<p class="hint" style="margin-top:8px">Tap Start when they reach the panel and Stop when they walk off.</p>'}
+  </section>`;
+
+  const fakeCard = crewSide ? '' : routeCard();
+
+  const rows = list => list.map(t => {
+    const badges = [];
+    if (t.t === 'common') badges.push('<span class="tag common">Common</span>');
+    if (isVisualTask(t)) badges.push(`<span class="tag vis">Visual${st.visual ? '' : ' (off)'}</span>`);
+    if (t.st.some(x => x.wait)) badges.push('<span class="tag">Wait</span>');
+    const added = !!state.fakes[t.n];
+    const q = (t.n + ' ' + chainText(t) + ' ' + (t.tip || '')).toLowerCase();
+    return `<li class="trow" data-q="${esc(q)}">
+      <div class="t-name">${esc(t.n)} ${badges.join('')}</div>
+      <div class="t-chain">${esc(chainText(t))}${t.tip ? `<br><span class="hint">${esc(t.tip)}</span>` : ''}</div>
+      <div class="t-side"><span class="t-time">${esc(timeText(t))}</span>
+        ${crewSide ? '' : `<button type="button" class="btn sm ${added ? 'ghost' : ''}" data-action="${added ? 'removeFake' : 'addFake'}" data-v="${esc(t.n)}">${added ? 'Added' : 'Add'}</button>`}</div>
+    </li>`;
+  }).join('');
+
+  const groups = [['common','Common'],['long','Long'],['short','Short']]
+    .filter(([k]) => byType[k].length)
+    .map(([k, label]) => `<div class="tgroup"><h3>${label} · ${byType[k].length}</h3><ul class="tlist">${rows(byType[k])}</ul></div>`).join('');
+
+  return `${exampleBanner()}
+    ${crewSide ? watchCard : fakeCard}
+    <section class="card"><div class="card-head"><h2>${esc(m.name)}</h2><span class="sub">Cheat sheet · match these to your lobby</span></div>${toggles}<dl class="facts">${facts}</dl></section>
+    <section class="card">
+      <div class="card-head"><h2>All tasks</h2><span class="sub">* = rough time</span></div>
+      <input type="search" id="task-q" placeholder="Search tasks or rooms" autocomplete="off" style="margin-bottom:12px" value="${esc(taskQuery)}">
+      ${groups || '<p class="empty">Task data for this map is still loading in the next version.</p>'}
+    </section>`;
+}
+let taskQuery = '';
+
+/* ---- Impostor route ---- */
+const fmtLeft = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function stepWarnings(t, i) {
+  const st = t.st[i], set = state.settings, w = [];
+  if (st.vis && set.visual) w.push('<span class="tag bad">Visual: only fake it with nobody around</span>');
+  if (i === t.st.length - 1 && set.bar === 'always') w.push('<span class="tag warn">This step fills the task bar</span>');
+  if (st.wait) w.push(`<span class="tag">Then come back in ${st.wait}s</span>`);
+  if (st.s == null) w.push('<span class="tag">Time varies, easy to fake</span>');
+  return w.join('');
+}
+function stepLine(s) {
+  const st = s.t.st[s.i];
+  const what = st.d || (s.t.st.length > 1 ? `step ${s.i + 1} of ${s.t.st.length}` : '');
+  return `${what ? what + ' · ' : ''}${fmtSecs(st.s)}${st.est && st.s != null ? ' approx.' : ''}`;
+}
+let lastFake = null;
+function routeCard() {
+  const m = map(), now = Date.now();
+  const names = Object.keys(state.fakes).filter(n => taskByName(n));
+  const head = '<div class="card-head"><h2>My route</h2><span class="sub">Walk it like a real crewmate would</span></div>';
+  if (!names.length) return `<section class="card">${head}
+    <p class="empty">Tap Add below on each task from your in-game fake list. For tasks like Download Data it asks which room your list names. Then this card shows where to go next, where the second half of each task happens, and when to come back to tasks that make you wait.</p></section>`;
+  const from = routeStart();
+  const fromOpts = [...new Set([...(m.spawnChoices || []), ...m.rooms])];
+  const fromSel = `<div class="from-row"><label class="lbl" for="route-from">I'm in</label>
+    <select id="route-from">${fromOpts.map(r => `<option value="${esc(r)}" ${r === from ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>`;
+  const waiting = names.filter(n => { const f = state.fakes[n]; return f.readyAt && f.readyAt > now && f.done.some(d => !d); });
+  const waitList = waiting.length ? `<ul class="waits">${waiting.map(n => {
+    const t = taskByName(n), f = state.fakes[n], i = f.done.findIndex(d => !d);
+    return `<li><b>${esc(n)}</b>: back to ${esc(stageRoom(t, i, resolvedKey(t, f, i)) || 'it')} in <span data-ready="${f.readyAt}">${fmtLeft(f.readyAt - now)}</span></li>`;
+  }).join('')}</ul>` : '';
+  const undo = lastFake ? '<button type="button" class="linkbtn" data-action="routeUndo">Undo last step</button>' : '';
+  const stops = toStops(planRoute(m, state.fakes, from, now));
+  if (!stops.length) return `<section class="card">${head}${fromSel}
+    <div class="nextstop done"><p class="eyebrow">All faked</p><h3 class="next-room">You're done</h3>
+      <p class="hint">Every task on your list is faked. Keep moving between rooms and stay near people so you have an alibi.</p></div>
+    ${undo}${fakeListBlock()}</section>`;
+  const next = stops[0], first = next.steps[0];
+  const path = [from, ...stops.map(s => s.room)].filter((r, k, a) => k === 0 || r !== a[k - 1]);
+  return `<section class="card">${head}${fromSel}
+    <div class="nextstop">
+      <p class="eyebrow">Next stop</p>
+      <h3 class="next-room">${esc(next.room)}</h3>
+      <p class="hint">${next.room === from ? "You're already here." : `About ${Math.max(1, Math.round(first.walk))} seconds' walk from ${esc(from)}.`}</p>
+      ${first.wait > 0.5 ? `<p class="wait-note">Nothing else to fake right now. Hang around nearby and head back in about <span data-ready="${now + Math.round(first.wait * 1000)}">${fmtLeft(first.wait * 1000)}</span>.</p>` : ''}
+      <ul class="next-steps">${next.steps.map(s => {
+        const v = `${esc(s.t.n)}|${s.i}|${esc(String(s.key))}`;
+        return `<li><div class="ns-main"><b>${esc(s.t.n)}</b><span class="s-time">${esc(stepLine(s))}</span><div class="warns">${stepWarnings(s.t, s.i)}</div></div>
+          <div class="ns-btns"><button type="button" class="btn sm" data-action="routeFake" data-v="${v}">Fake it</button>
+          <button type="button" class="btn ghost sm" data-action="routeDone" data-v="${v}">Done</button></div></li>`;
+      }).join('')}</ul>
+      <button type="button" class="linkbtn" data-action="routeLater" data-v="${esc([...new Set(next.steps.map(s => s.t.n))].join('|'))}">Someone's watching. Do this stop later.</button>
+    </div>
+    ${waitList}
+    <p class="eyebrow" style="margin:14px 0 6px">Your path</p>
+    <div class="path">${path.map((r, k) => `<span class="pathstop ${k === 0 ? 'here' : ''}">${esc(r)}</span>`).join('<span class="arrow" aria-hidden="true">→</span>')}</div>
+    ${stops.length > 1 ? `<ol class="stops">${stops.slice(1).map(s => `<li><b>${esc(s.room)}</b><span>${esc(s.steps.map(x => x.t.n + (x.t.st[x.i].d ? ` (${x.t.st[x.i].d})` : '')).join(', '))}${s.steps[0].wait > 0.5 ? ' · after the wait' : ''}</span></li>`).join('')}</ol>` : ''}
+    ${undo}
+    ${fakeListBlock()}
+  </section>`;
+}
+function fakeListBlock() {
+  const names = Object.keys(state.fakes).filter(n => taskByName(n));
+  return `<p class="eyebrow" style="margin:16px 0 6px">Your fake list</p>
+    <ul class="tlist">${names.map(n => {
+      const t = taskByName(n), f = state.fakes[n];
+      const done = f.done.filter(Boolean).length;
+      return `<li class="trow"><div class="t-name">${esc(n)} <span class="tag ${done === t.st.length ? 'st-safe' : ''}">${done}/${t.st.length}</span></div>
+        <div class="t-chain">${esc(t.st.map((x, i) => stageLabel(t, i, resolvedKey(t, f, i))).join(' → '))}</div>
+        <div class="t-side"><button type="button" class="btn ghost sm" data-action="removeFake" data-v="${esc(n)}">Remove</button></div></li>`;
+    }).join('')}</ul>`;
+}
+
+/* ---- Room picker, for tasks whose room comes from your list ---- */
+let picking = null;
+function renderPicker() {
+  const t = taskByName(picking.n), i = picking.queue[0], st = t.st[i];
+  const opts = st.wire
+    ? t.panels.slice(0, t.panels.length - (t.st.length - 1)).map((r, j) => ({label: r, v: j}))
+    : st.r.map(r => ({label: r, v: r}));
+  const q = st.wire ? 'Which room does your list show for Fix Wiring?' : (st.ask || 'Which room does your list name?');
+  $('#sheet').innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pick-title">
+    <div class="sheet-head"><h2 id="pick-title">${esc(t.n)}</h2><button type="button" class="x" data-action="closeSheet" aria-label="Close">×</button></div>
+    <div class="sec"><h3>${esc(q)}</h3>
+      <div class="rooms">${opts.map(o => `<button type="button" class="room" data-action="pickRoom" data-v="${esc(String(o.v))}">${esc(o.label)}</button>`).join('')}</div>
+      ${st.wire ? '<p class="hint" style="margin-top:8px">That\'s your first panel. The route picks the next two in the right order.</p>' : ''}</div>
+  </div>`;
+  $('#sheet').hidden = false;
+  const b = $('#sheet .room'); if (b) b.focus();
+}
+function splitStep(v) {
+  const parts = v.split('|'), n = parts[0], i = Number(parts[1]), raw = parts.slice(2).join('|');
+  const t = taskByName(n);
+  return {t, i, key: t && t.st[i].wire ? Number(raw) : raw};
+}
+/* quiet: the caller saves and redraws once at the end (a voice "done") */
+function completeStep(t, i, key, quiet) {
+  const f = state.fakes[t.n]; if (!f) return;
+  const st = t.st[i];
+  const entry = {id: uid(), t: Date.now(), ph: phaseKey(), k: 'fake', text: `${t.n}: ${stageLabel(t, i, key)}`};
+  lastFake = {n: t.n, i, prevFrom: state.routeFrom, prevReady: f.readyAt, prevRoom: f.room[i], logId: entry.id};
+  f.done[i] = true; f.room[i] = key; f.skip = 0;
+  f.readyAt = st.wait ? Date.now() + st.wait * 1000 : null;
+  state.routeFrom = stageRoom(t, i, key) || state.routeFrom;
+  state.log.push(entry);
+  if (!quiet) commit();
+}
+
+/* ---- Log ---- */
+function eventText(e) {
+  const who = e.who ? nameOf(e.who) : '';
+  switch (e.k) {
+    case 'seen': return `${who} seen in ${e.room}`;
+    case 'body': return `${who} found dead in ${e.room}`;
+    case 'visual': return `${who}: ${e.text}`;
+    case 'claim': return `${who}: ${e.text}`;
+    case 'status': return `${who} marked ${e.text}`;
+    case 'saw': return `${who} ${e.text}`;
+    case 'fake': return `Faked ${e.text}`;
+    case 'mine': return `My story: ${e.text}`;
+    default: return who ? `${who}: ${e.text}` : e.text;
+  }
+}
+function eventRow(e) {
+  return `<li class="ev k-${e.k}"><time datetime="${new Date(e.t).toISOString()}">${fmtClock(e.t)}</time>
+    ${e.who && COLOR[e.who] ? swatch(e.who, 'sm') : '<span class="ico" aria-hidden="true">•</span>'}
+    <span class="txt">${esc(eventText(e))}</span>
+    <button type="button" class="del" data-action="delLog" data-v="${e.id}" aria-label="Delete this entry">×</button></li>`;
+}
+function viewLog() {
+  const f = state.logFilter;
+  const entries = state.log.filter(e => f === 'all' || e.who === f);
+  const groups = [];
+  entries.forEach(e => {
+    let g = groups.find(x => x.ph === e.ph);
+    if (!g) { g = {ph: e.ph, items: []}; groups.push(g); }
+    g.items.push(e);
+  });
+  groups.reverse();
+  return `${exampleBanner()}
+    <section class="card">
+      <div class="card-head"><h2>Log</h2><span class="sub">${state.log.length} ${plural(state.log.length, 'entry', 'entries')}</span></div>
+      <form class="row" data-form="note"><input type="text" id="note-input" placeholder="Add a note" autocomplete="off" maxlength="200"><button class="btn" type="submit">Add</button></form>
+      <div class="filters" role="group" aria-label="Filter by player">
+        <button type="button" class="pick" data-action="logFilter" data-v="all" aria-pressed="${f === 'all'}" style="padding-left:10px">Everyone</button>
+        ${state.lobby.map(id => `<button type="button" class="pick" data-action="logFilter" data-v="${id}" aria-pressed="${f === id}">${swatch(id, 'sm')}${esc(nameOf(id))}</button>`).join('')}
+      </div>
+    </section>
+    ${groups.length ? groups.map(g => `<section><p class="phase-h">${esc(phaseName(g.ph))}</p><ul class="events">${g.items.slice().reverse().map(eventRow).join('')}</ul></section>`).join('')
+      : '<p class="empty">No entries yet.</p>'}`;
+}
+
+/* ---- Setup ---- */
+function viewSetup() {
+  const st = state.settings;
+  const mapIds = Object.keys(MAPS);
+  return `${exampleBanner()}
+    <section class="card">
+      <div class="card-head"><h2>Map</h2></div>
+      <div class="maps">${mapIds.map(k => `<button type="button" class="mapbtn" data-action="setMap" data-v="${k}" aria-pressed="${state.map === k}"><b>${esc(MAPS[k].name)}</b><span>${MAPS[k].rooms.length} rooms · ${(MAPS[k].tasks || []).length} tasks</span></button>`).join('')}</div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Who's in the lobby</h2><span class="sub">${state.lobby.length} players</span></div>
+      <div class="colors">${COLORS.map(c => `<button type="button" class="cbtn" data-action="toggleColor" data-v="${c.id}" aria-pressed="${state.lobby.includes(c.id)}">${swatch(c.id)}${c.name}</button>`).join('')}</div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Names</h2><span class="sub">Optional. Tap "Me" on your color.</span></div>
+      <div class="names">${state.lobby.map(id => `<div class="name-row">${swatch(id)}
+        <input type="text" id="name-${id}" data-name="${id}" value="${esc(state.names[id] || '')}" placeholder="${COLOR[id].name}" autocomplete="off" maxlength="24" aria-label="Name for ${COLOR[id].name}">
+        <button type="button" class="me-btn" data-action="setMe" data-v="${id}" aria-pressed="${state.me === id}">Me</button></div>`).join('')}</div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Game settings</h2><span class="sub">Match your lobby</span></div>
+      <div class="toggles">
+        <div class="toggle-row"><span>Impostors</span><div class="seg" role="group" aria-label="Impostors">${[1,2,3].map(n => `<button type="button" data-action="setImps" data-v="${n}" aria-pressed="${state.imps === n}">${n}</button>`).join('')}</div></div>
+        <div class="toggle-row"><span>Confirm ejects</span><div class="seg" role="group" aria-label="Confirm ejects">
+          <button type="button" data-action="setSetting" data-v="confirm:1" aria-pressed="${st.confirm}">On</button>
+          <button type="button" data-action="setSetting" data-v="confirm:0" aria-pressed="${!st.confirm}">Off</button></div></div>
+        <div class="toggle-row"><span>Visual tasks</span><div class="seg" role="group" aria-label="Visual tasks">
+          <button type="button" data-action="setSetting" data-v="visual:1" aria-pressed="${st.visual}">On</button>
+          <button type="button" data-action="setSetting" data-v="visual:0" aria-pressed="${!st.visual}">Off</button></div></div>
+        <div class="toggle-row"><span>Task bar updates</span><div class="seg" role="group" aria-label="Task bar updates">
+          ${['always','meetings','never'].map(v => `<button type="button" data-action="setSetting" data-v="bar:${v}" aria-pressed="${st.bar === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div>
+        <div class="toggle-row"><span>Keep screen awake</span><div class="seg" role="group" aria-label="Keep screen awake">
+          <button type="button" data-action="setAwake" data-v="1" aria-pressed="${!!state.awake}">On</button>
+          <button type="button" data-action="setAwake" data-v="0" aria-pressed="${!state.awake}">Off</button></div></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Game</h2></div>
+      <div class="row" style="flex-wrap:wrap">
+        <button type="button" class="btn ${armed === 'newGame' ? 'armed' : ''}" data-action="newGame">${armed === 'newGame' ? 'Tap again to clear this game' : 'New game'}</button>
+        <button type="button" class="btn danger ${armed === 'resetAll' ? 'armed' : ''}" data-action="resetAll">${armed === 'resetAll' ? 'Tap again to erase everything' : 'Reset everything'}</button>
+      </div>
+      <p class="hint" style="margin-top:8px">New game keeps your lobby, names and settings and clears marks, the log and fake tasks.</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>How to use it in a game</h2></div>
+      <ol class="tips">
+        <li>Before the game starts, set the map, the colors in your lobby, which one is you, and the lobby settings above.</li>
+        <li>Pick Crewmate or Impostor at the top once you see your role.</li>
+        <li>While you play, tap a player and then the room you saw them in. Mark bodies, sus players and anyone you watched finish a visual task.</li>
+        <li>Or use the voice box at the top: tap it, tap the mic on your keyboard, and say "black in admin". Tap ? next to it for everything it understands.</li>
+        <li>When a meeting starts, tap Meeting called. The vote check tells you if skipping is safe, and the list shows where everyone was last seen.</li>
+        <li>As impostor, add the tasks from your fake list on the Tasks tab. My route then shows your next stop, and Fake it times how long to stand at each panel.</li>
+      </ol>
+    </section>
+    <section class="card about">
+      <p>Fan-made tool. Not affiliated with or endorsed by Innersloth. Task data comes from the Among Us Wiki and guide sites as of October 2026; times marked approx. are estimates.</p>
+      <p>Your games are saved in this browser only.</p>
+    </section>`;
+}
+
+/* things that need the real DOM after a render */
+function afterRender() {
+  const q = $('#task-q');
+  if (q) filterTasks(q.value);
+}
+function filterTasks(v) {
+  taskQuery = v;
+  const needle = v.trim().toLowerCase();
+  document.querySelectorAll('.trow[data-q]').forEach(li => { li.hidden = !!needle && !li.dataset.q.includes(needle); });
+  document.querySelectorAll('.tgroup').forEach(g => { g.hidden = !!needle && !g.querySelector('.trow[data-q]:not([hidden])'); });
+}
+
+/*__VOICE_PARSER_START__*/
+/* =====================================================================
+   4b. VOICE LOG PARSER
+   Turns what you said ("black in admin") into a plan: a list of actions
+   like {type:'seen', who:['black'], room:'Admin'}. It only reads text and
+   returns a plan, so it can be tested on its own. applyPlan() below
+   carries the plan out with the same steps the buttons use.
+   ===================================================================== */
+
+/* how speech-to-text tends to spell each color */
+const COLOR_SAYS = {
+  red: ['red', 'read', 'redd'], blue: ['blue', 'blew', 'blu'], green: ['green', 'greene'],
+  pink: ['pink'], orange: ['orange', 'orang'], yellow: ['yellow', 'yello'],
+  black: ['black', 'blak', 'blac', 'block'], white: ['white', 'wight', 'wite'],
+  purple: ['purple', 'purpel', 'purp'], brown: ['brown'],
+  cyan: ['cyan', 'sian', 'sion', 'scion', 'sayan', 'cyanne'], lime: ['lime', 'lyme', 'line'],
+  maroon: ['maroon', 'marooned', 'marone'], rose: ['rose', 'rows', 'roes'],
+  banana: ['banana', 'bananas'], gray: ['gray', 'grey'], tan: ['tan', 'tanned'],
+  coral: ['coral', 'choral', 'corral', 'carol']
+};
+
+/* other names people say for rooms. Each room's own name always works too.
+   The first entry that's clearly shorter shows up in the help sheet. */
+const ROOM_SAYS = {
+  'Admin': ['administration', 'admins'],
+  'Cafeteria': ['cafe', 'caf', 'lunch room', 'lunchroom'],
+  'Weapons': ['weapon', 'weps', 'guns'],
+  'O2': ['oxygen'],
+  'Navigation': ['nav', 'navi'],
+  'Shields': ['shield'],
+  'Communications': ['comms', 'coms', 'comm', 'com', 'calms', 'communication'],
+  'Storage': ['store', 'stores'],
+  'Electrical': ['elec', 'electric', 'electricity', 'lectrical', 'electricals'],
+  'Lower Engine': ['lower', 'lower engines', 'low engine', 'bottom engine'],
+  'Upper Engine': ['upper', 'upper engines', 'top engine'],
+  'Security': ['cams', 'sec', 'secure', 'cameras', 'camera'],
+  'Reactor': ['react', 'reacter'],
+  'MedBay': ['med', 'med bay', 'medical', 'meds', 'medic'],
+  'Hallway': ['hall', 'hallways', 'corridor'],
+  'Launchpad': ['launch', 'launch pad'],
+  'Locker Room': ['lockers', 'locker', 'locker rooms'],
+  'Decontamination': ['decon', 'decontam', 'decontaminate'],
+  'Laboratory': ['lab', 'labs'],
+  'Greenhouse': ['green house'],
+  'Office': ['offices'],
+  'Balcony': ['balconies'],
+  'Dropship': ['drop ship'],
+  'Boiler Room': ['boiler', 'boilers'],
+  'Specimen Room': ['specimen', 'specimens', 'spec'],
+  'Outside': ['outdoors'],
+  'Cockpit': ['cock pit'],
+  'Armory': ['armor', 'armoury', 'armour'],
+  'Viewing Deck': ['deck', 'viewing', 'view deck'],
+  'Engine Room': ['engine', 'engines'],
+  'Vault': ['volt', 'vaults'],
+  'Brig': ['brick', 'brigg'],
+  'Gap Room': ['gap'],
+  'Main Hall': ['main', 'main hallway'],
+  'Records': ['record', 'record room'],
+  'Lounge': ['lounges'],
+  'Showers': ['shower'],
+  'Cargo Bay': ['cargo'],
+  'Medical': ['med', 'med bay', 'medbay', 'meds'],
+  'Kitchen': ['kitchens'],
+  'Ventilation': ['vent room'],
+  'Hall of Portraits': ['portraits', 'portrait', 'portrait hall', 'portrait room'],
+  'Beach': ['campfire'],
+  'Dock': ['docks', 'doc', 'pier'],
+  'Splash Zone': ['splash', 'pool'],
+  'The Dorm': ['dorms', 'dormitory'],
+  'Lookout': ['look out'],
+  'Mining Pit': ['mine', 'mines', 'mining', 'pit'],
+  'The Cliffs': ['cliff']
+};
+/* short names that only make sense on one map ("engine" on The Fungle) */
+const ROOM_SAYS_MAP = {fungle: {'Upper Engine': ['engine', 'engines']}};
+
+/* word lists. A phrase is matched before the single words inside it. */
+const tokens = (list, tok) => list.map(p => [p, tok]);
+const SAY_PHRASES = [
+  ...tokens(['back to tasks', 'back to task', 'meeting over', 'meeting is over', 'meeting ended', 'end meeting', 'end the meeting',
+    'voting over', 'voting is over', 'vote over', 'voting ended', 'voting done', 'vote done', 'new round'], {t: 'endmeet'}),
+  ...tokens(['emergency meeting', 'meeting called', 'called a meeting', 'called meeting', 'call a meeting', 'called the meeting',
+    'called an emergency', 'body reported', 'reported a body', 'reported the body', 'reported body'], {t: 'meet'}),
+  ...tokens(['scratch that', 'never mind', 'delete that', 'undo that', 'take that back'], {t: 'undo'}),
+  ...tokens(['voted out', 'kicked out', 'thrown out', 'got voted out', 'got ejected', 'was ejected', 'got voted'], {t: 'kw', k: 'ejected'}),
+  ...tokens(['killed by', 'murdered by', 'stabbed by', 'shot by', 'got killed by', 'was killed by'], {t: 'kw', k: 'kill', passive: true}),
+  ...tokens(['dead body', 'found dead'], {t: 'kw', k: 'dead'}),
+  ...tokens(['did scan', 'did the scan', 'did a scan', 'did their scan', 'did his scan', 'did her scan', 'did asteroids',
+    'did the asteroids', 'did shields', 'did the shields', 'did trash', 'did the trash', 'did garbage', 'did the garbage',
+    'took out the trash', 'did visual', 'did a visual', 'did the visual', 'visual task'], {t: 'kw', k: 'visual'}),
+  ...tokens(['came out of a vent', 'came out of vent', 'out of a vent', 'in a vent', 'jumped in a vent', 'jumped in vent', 'jumped into a vent'], {t: 'kw', k: 'vent'}),
+  ...tokens(['the impostor', 'an impostor', 'the imposter', 'an imposter'], {t: 'imp', v: true}),
+  ...tokens(['my partner', 'team mate', 'my teammate'], {t: 'kw', k: 'partner'}),
+  ...tokens(['i am', 'i was'], {t: 'self'}),
+  ...tokens(['all done', 'faked it', 'faked that', 'done with that'], {t: 'done'})
+];
+const STOP = ('a an the and or but so then also too just now again still in at on to into inside near next by from of off out with ' +
+  'around toward towards over under up down here there that this these those it its he she they them him her his their i me my we ' +
+  'us our you your is are was were be been being do does did doing go goes going went gone come came coming walk walked walking ran ' +
+  'run running left leave leaving heading headed followed following follow chasing chased standing stood sitting saw see seen sees ' +
+  'seeing spotted spot found find watch watched watching looked looking um uh uhh hmm like okay ok yeah yes hey guy guys player ' +
+  'someone somebody person one room area task tasks thing what when where who why how think thought know maybe probably definitely ' +
+  'really very kinda kind sort pretty super little bit about mine pick got get gets getting has have had having said says say tell ' +
+  'told can could would should will way side right top bottom middle ' +
+  /* everyday and in-game words that are one typo away from a color or room ("time" -> lime, "power" -> lower) */
+  'time while clue lose lost fellow hello write wrote story power wires wire wiring card swipe swiping upload uploading ' +
+  'download downloading data fuel fueling gas filter course chart steering manifolds sample samples divert diverting fix ' +
+  'fixing fixed lights light sabotage sabotaged doors door closed locked').split(' ');
+const STOPSET = new Set(STOP);
+const SAY_WORDS = [
+  ...tokens(['meeting', 'emergency', 'reported', 'report'], {t: 'meet'}),
+  ...tokens(['undo', 'oops', 'cancel', 'nevermind'], {t: 'undo'}),
+  ...tokens(['ejected', 'eject', 'voted', 'kicked', 'booted', 'yeeted'], {t: 'kw', k: 'ejected'}),
+  ...tokens(['killed', 'kill', 'kills', 'killing', 'murdered', 'murder', 'stabbed', 'stab', 'shot', 'snapped', 'slashed'], {t: 'kw', k: 'kill'}),
+  ...tokens(['dead', 'died', 'dies', 'body', 'bodies', 'corpse', 'deceased'], {t: 'kw', k: 'dead'}),
+  ...tokens(['vent', 'vented', 'venting', 'vents'], {t: 'kw', k: 'vent'}),
+  ...tokens(['scan', 'scanned', 'scanning', 'visual', 'asteroids', 'garbage', 'trash', 'chute'], {t: 'kw', k: 'visual'}),
+  ...tokens(['sus', 'suss', 'sussy', 'suspicious', 'suspect', 'sketchy', 'shady', 'fishy', 'faking', 'faker', 'fake', 'faked',
+    'lying', 'liar', 'lied'], {t: 'kw', k: 'sus'}),
+  ...tokens(['safe', 'clear', 'cleared', 'clean', 'confirmed', 'innocent', 'trusted', 'trust', 'legit', 'crew', 'crewmate',
+    'crewmates'], {t: 'kw', k: 'safe'}),
+  ...tokens(['unknown', 'unmark', 'unmarked', 'neutral', 'alive'], {t: 'kw', k: 'unknown'}),
+  ...tokens(['partner', 'teammate', 'buddy'], {t: 'kw', k: 'partner'}),
+  ...tokens(['impostor', 'imposter', 'impostors', 'imposters', 'imp'], {t: 'imp', v: true}),
+  ...tokens(['not', 'isnt', 'wasnt', 'aint', 'never', 'nope'], {t: 'not'}),
+  ...tokens(['by'], {t: 'by'}),
+  ...tokens(['im'], {t: 'self'}),
+  ...tokens(['done', 'finished'], {t: 'done'}),
+  ...tokens(STOP, {t: 'stop'})
+];
+
+const andList = a => a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+/* lower case, no punctuation, "black's" -> "black", "isn't" -> "isnt", "oh two" -> "o2" */
+function normSpeech(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[‘’`]/g, "'")
+    .replace(/&/g, ' and ')
+    .replace(/'s\b/g, '')
+    .replace(/'/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(?:o|oh|0)\s*(?:2|two)\b/g, 'o2')
+    .trim().replace(/\s+/g, ' ');
+}
+
+/* every phrase this map understands -> what it means. Rooms go in first,
+   so "green house" is the Greenhouse, not the color green plus "house". */
+function voiceLexicon(ctx) {
+  const m = MAPS[ctx.map] || MAPS.skeld;
+  const lex = new Map(), fuzzy = [];
+  const add = (phrase, tok, fuzz) => {
+    const p = normSpeech(phrase);
+    if (!p || lex.has(p)) return;
+    lex.set(p, tok);
+    const g = p.replace(/ /g, '');
+    if (fuzz && g.length >= 4) fuzzy.push({g, tok});
+  };
+  for (const r of m.rooms) {
+    const tok = {t: 'room', r};
+    add(r, tok, true);
+    if (/^the /i.test(r)) add(r.slice(4), tok, true);
+    for (const a of (ROOM_SAYS[r] || [])) add(a, tok, true);
+    for (const a of ((ROOM_SAYS_MAP[ctx.map] || {})[r] || [])) add(a, tok, true);
+  }
+  for (const [p, tok] of SAY_PHRASES) add(p, tok, false);
+  /* only a color's real name forgives typos; the misspellings above must match exactly */
+  for (const c of COLORS) for (const a of COLOR_SAYS[c.id]) add(a, {t: 'color', c: c.id}, a === c.id);
+  for (const [id, name] of Object.entries(ctx.names || {})) if (COLOR[id]) add(name, {t: 'color', c: id}, true);
+  for (const [w, tok] of SAY_WORDS) add(w, tok, false);
+  return {lex, fuzzy};
+}
+
+/* edit distance: how many typos turn a into b (a missing, extra, wrong or
+   swapped letter each count as one). Gives up early once it's past max. */
+function lev(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let pp = null, prev = Array.from({length: b.length + 1}, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (pp && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, pp[j - 2] + 1);   /* "blakc" */
+      cur[j] = v;
+      if (v < best) best = v;
+    }
+    if (best > max) return max + 1;
+    pp = prev; prev = cur;
+  }
+  return prev[b.length];
+}
+/* how many typos to forgive: none up to 3 letters, 1 up to 7, 2 for long words like "electrical" */
+const fuzzMax = n => n <= 3 ? 0 : n <= 7 ? 1 : 2;
+
+/* closest room, color or player name to an unknown word ("elecrical"),
+   also trying it glued to the next word ("men bay" -> "medbay") */
+function fuzzyHit(words, i, L, ctx) {
+  let best = null;
+  for (const span of [1, 2]) {
+    if (i + span > words.length) break;
+    const parts = words.slice(i, i + span);
+    if (span === 2 && (STOPSET.has(parts[1]) || L.lex.has(parts[1]))) break;
+    const glued = parts.join('');
+    if (glued.length < 4) continue;
+    for (const f of L.fuzzy) {
+      const max = fuzzMax(Math.min(glued.length, f.g.length));   /* "hello" is too short to forgive 2 typos and become "yellow" */
+      if (!max) continue;
+      const d = lev(glued, f.g, max);
+      if (d > max) continue;
+      /* a color that's actually in the lobby wins a tie */
+      const score = d + (f.tok.t === 'color' && ctx.lobby && !ctx.lobby.includes(f.tok.c) ? 0.5 : 0);
+      if (!best || score < best.score) best = {tok: f.tok, n: span, score};
+    }
+  }
+  return best;
+}
+
+/* words -> tokens, longest phrase first (up to 5 words, "came out of a vent") */
+function tokenizeSpeech(words, L, ctx) {
+  const out = [];
+  for (let i = 0; i < words.length;) {
+    let hit = null;
+    for (let n = Math.min(5, words.length - i); n >= 1 && !hit; n--) {
+      const tok = L.lex.get(words.slice(i, i + n).join(' '));
+      if (tok) hit = {tok, n};
+    }
+    if (!hit) hit = fuzzyHit(words, i, L, ctx);
+    if (hit) { out.push({...hit.tok, raw: words.slice(i, i + hit.n).join(' ')}); i += hit.n; }
+    else { out.push({t: 'word', raw: words[i]}); i++; }
+  }
+  return out;
+}
+function colorsIn(text, ctx) {
+  const words = normSpeech(text).split(' ').filter(Boolean);
+  const found = tokenizeSpeech(words, voiceLexicon(ctx), ctx).filter(t => t.t === 'color').map(t => t.c);
+  return [...new Set(found)];
+}
+const tidyText = s => { const t = String(s).trim().replace(/^[\s,:;.\-]+/, '').replace(/\s+/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
+
+/* marks that a "red too" can borrow from the clause before it */
+const INHERIT = new Set(['seen', 'sus', 'safe', 'unknown', 'dead']);
+
+function parseCommand(text, ctx) {
+  const nm = id => (ctx.names && ctx.names[id]) || COLOR[id].name;
+  const raw = String(text || '').trim();
+  const clean = normSpeech(raw);
+  if (!clean) return {ok: false, empty: true, error: ''};
+
+  /* "note ..." keeps your own words */
+  let m = /^\s*(?:add (?:a )?note|notes?|remember)\b[\s,:.\-]*(.+)$/i.exec(raw);
+  if (m && normSpeech(m[1])) return {ok: true, actions: [{type: 'note', text: tidyText(m[1])}], warn: []};
+
+  /* "red says ..." is a claim, so a room inside it isn't a sighting */
+  m = /^(.+?)\s+(?:says|said|claims|claimed|is saying|was saying|thinks)\b[\s,:.\-]*(.+)$/i.exec(raw);
+  if (m) {
+    const who = colorsIn(m[1], ctx);
+    if (who.length === 1 && normSpeech(m[2])) return {ok: true, actions: [{type: 'claim', speaker: who[0], text: tidyText(m[2])}], warn: []};
+  }
+
+  const toks = tokenizeSpeech(clean.split(' '), voiceLexicon(ctx), ctx);
+
+  /* Walk the tokens and cut them into clauses, one per thing you saw:
+     "black in admin red sus" -> [black, Admin] [red, sus].
+     A new color starts a new clause once the current one is complete. */
+  const fresh = () => ({colors: [], before: [], room: null, kind: null, imp: null, neg: false, passive: false, self: false});
+  const anyone = x => x.colors.length + x.before.length > 0 || x.self;
+  const complete = x => anyone(x) && !!(x.room || x.kind || x.imp != null);
+  const groups = [], reporters = [], flags = {};
+  let g = fresh();
+  const close = () => { if (anyone(g) || g.room) groups.push(g); g = fresh(); };
+
+  for (const tok of toks) {
+    switch (tok.t) {
+      case 'color':
+        /* "red killed black": keep adding victims until a room shows up */
+        if (complete(g) && !(g.kind === 'kill' && !g.room)) close();
+        if (!g.colors.includes(tok.c) && !g.before.includes(tok.c)) g.colors.push(tok.c);
+        break;
+      case 'self':
+        if (complete(g)) close();
+        g.self = true;
+        break;
+      case 'room':
+        if (g.room && anyone(g)) close();
+        g.room = tok.r;
+        break;
+      case 'kw': {
+        let k = tok.k;
+        if (g.neg) {
+          g.neg = false;
+          k = {sus: 'safe', safe: 'sus', dead: 'unknown'}[k] || null;   /* "not sus", "not dead" */
+          if (!k) break;
+        }
+        if (k === 'kill') {
+          if (g.kind && g.kind !== 'kill' && complete(g)) close();
+          if (g.kind !== 'kill') { g.before = g.colors; g.colors = []; g.kind = 'kill'; }
+          if (tok.passive) g.passive = true;
+        } else if (g.kind === 'ejected' && (k === 'safe' || k === 'sus')) {
+          g.imp = k === 'sus';                       /* "ejected, was crew" */
+        } else if (!(g.kind === 'kill' && k === 'dead')) {
+          g.kind = k;
+        }
+        break;
+      }
+      case 'imp': {
+        let v = tok.v;
+        if (g.neg) { g.neg = false; v = !v; }
+        g.imp = v;
+        break;
+      }
+      case 'not': g.neg = true; break;
+      case 'by': if (g.kind === 'kill') g.passive = true; break;
+      case 'meet':
+        /* "blue reported ..." - blue called it, and isn't part of what comes next */
+        if (g.colors.length && !g.kind && !g.room && g.imp == null) { reporters.push(...g.colors); g = fresh(); }
+        flags.meet = true;
+        break;
+      case 'endmeet': flags.endmeet = true; break;
+      case 'undo': flags.undo = true; break;
+      case 'done': flags.done = true; break;
+    }
+  }
+  close();
+
+  /* clauses -> actions */
+  const actions = [], warn = [];
+  let prev = null;
+  for (const x of groups) {
+    let kind = x.kind || (x.imp === true ? 'sus' : x.imp === false ? 'safe' : null);
+    const people = [...x.before, ...x.colors];
+    let room = x.room;
+    if (x.self) {
+      if (room) {
+        actions.push({type: 'self', room});
+        if (x.colors.length) actions.push({type: 'seen', who: x.colors, room});
+      }
+      continue;
+    }
+    if (!people.length) {
+      /* a room on its own after a sighting: "black in admin, then med bay" */
+      if (prev && prev.kind === 'seen') actions.push({type: 'seen', who: prev.who, room});
+      else warn.push(`Who was in ${room}?`);
+      continue;
+    }
+    if (!kind && !room) {
+      /* "red too" borrows the room or mark from the clause before */
+      if (prev && INHERIT.has(prev.kind)) { kind = prev.kind === 'seen' ? null : prev.kind; room = prev.room; }
+      else { warn.push(`Where was ${andList(people.map(nm))}?`); continue; }
+    }
+    switch (kind) {
+      case null: actions.push({type: 'seen', who: people, room}); break;
+      case 'sus': case 'safe': case 'unknown': actions.push({type: 'status', who: people, s: kind, room}); break;
+      case 'dead': actions.push({type: 'dead', who: people, room}); break;
+      case 'kill': {
+        let killers = [], victims = people;
+        if (x.passive) { victims = x.before; killers = x.colors; }          /* "black killed by red" */
+        else if (x.before.length && x.colors.length) { killers = x.before; victims = x.colors; }
+        actions.push({type: 'kill', killers, victims, room});
+        break;
+      }
+      case 'vent': actions.push({type: 'vent', who: people, room}); break;
+      case 'visual': actions.push({type: 'visual', who: people, room}); break;
+      case 'ejected': actions.push({type: 'eject', who: people, imp: x.imp}); break;
+      case 'partner': actions.push({type: 'partner', who: people}); break;
+    }
+    prev = {kind: kind || 'seen', room, who: people};
+  }
+
+  if (flags.endmeet) actions.unshift({type: 'endmeet'});
+  if (flags.meet) actions.push({type: 'meet', reporters});
+  if (flags.done && !groups.some(x => x.colors.length || x.before.length)) actions.push({type: 'done'});
+  if (flags.undo) actions.unshift({type: 'undo'});          /* "undo, black in med bay" fixes the last one */
+  if (!actions.length) {
+    if (warn.length) return {ok: false, partial: true, error: warn[0]};
+    return {ok: false, error: `Didn't catch a player or a room in "${raw}".`};
+  }
+  return {ok: true, actions, warn};
+}
+/*__VOICE_PARSER_END__*/
+
+/* =====================================================================
+   4c. VOICE LOG ON THE PAGE
+   ===================================================================== */
+const voiceCtx = () => ({map: state.map, lobby: state.lobby, names: state.names, mode: state.mode});
+const andNames = ids => andList(ids.map(nameOf));
+const capFirst = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+function startMeeting() {
+  state.meetings += 1; state.phase = 'meeting'; claimWho = null;
+  addLog('meet', {text: `Meeting ${state.meetings} called`});
+  state.tab = 'meeting';
+}
+function endMeeting() {
+  state.phase = 'tasks'; state.round = state.meetings + 1; state.routeFrom = null;
+  addLog('round', {text: 'Back to tasks'});
+  state.tab = 'players';
+}
+
+/* carry out a plan from parseCommand. Returns what happened, in words. */
+function applyPlan(actions) {
+  const said = [], warn = [], joined = [];
+  const alive = id => !['dead', 'ejected'].includes(P(id).s);
+  const inRoom = r => r ? ` in ${r}` : '';
+  /* a color you haven't added to the lobby yet gets added */
+  const join = id => {
+    if (state.lobby.includes(id)) return true;
+    if (state.lobby.length >= 15) { warn.push(`${COLOR[id].name} isn't in your lobby, and it's full`); return false; }
+    state.lobby.push(id); joined.push(COLOR[id].name);
+    return true;
+  };
+  const mark = (id, s) => {
+    const p = P(id);
+    if (p.s === s) return;
+    p.s = s;
+    if (s !== 'ejected') p.ejImp = null;
+    if (s !== 'dead') p.body = null;
+    addLog('status', {who: id, text: statusLabel(s)});
+  };
+  const die = (id, room) => {
+    const p = P(id);
+    if (p.s === 'dead' && (!room || p.body === room)) return;     /* already logged */
+    p.s = 'dead'; p.ejImp = null;
+    if (room) { p.body = room; addLog('body', {who: id, room}); }
+    else addLog('status', {who: id, text: statusLabel('dead')});
+  };
+  const sight = (id, room) => {
+    const p = P(id);
+    if (p.s === 'ejected') { warn.push(`${nameOf(id)} was ejected`); return false; }
+    if (p.s === 'dead') {
+      if (!p.body) { p.body = room; addLog('body', {who: id, room}); said.push(`${nameOf(id)}'s body is in ${room}`); }
+      else warn.push(`${nameOf(id)} is already dead`);
+      return false;
+    }
+    addLog('seen', {who: id, room});
+    return true;
+  };
+
+  for (const a of actions) {
+    const ids = (a.who || []).filter(join);
+    switch (a.type) {
+      case 'seen': {
+        const ok = ids.filter(id => sight(id, a.room));
+        if (ok.length) said.push(`${andNames(ok)} seen in ${a.room}`);
+        break;
+      }
+      case 'status': {
+        const ok = [];
+        for (const id of ids) {
+          if (a.s !== 'unknown' && !alive(id)) { warn.push(`${nameOf(id)} is already ${P(id).s}`); continue; }
+          mark(id, a.s); ok.push(id);
+          if (a.room && alive(id)) addLog('seen', {who: id, room: a.room});
+        }
+        if (ok.length) said.push(`${andNames(ok)}: ${statusLabel(a.s)}${a.room ? `, seen in ${a.room}` : ''}`);
+        break;
+      }
+      case 'dead':
+        ids.forEach(id => die(id, a.room));
+        if (ids.length) said.push(`${andNames(ids)} dead${inRoom(a.room)}`);
+        break;
+      case 'kill': {
+        const victims = a.victims.filter(join), killers = a.killers.filter(join);
+        victims.forEach(id => die(id, a.room));
+        const what = `killed ${andNames(victims) || 'someone'}${inRoom(a.room)}`;
+        for (const id of killers) {
+          if (state.mode === 'crew' && alive(id)) mark(id, 'sus');
+          addLog('saw', {who: id, room: a.room, text: what});
+        }
+        said.push(killers.length ? `${andNames(killers)} ${what}` : `${andNames(victims)} killed${inRoom(a.room)}`);
+        break;
+      }
+      case 'vent':
+        for (const id of ids) {
+          if (state.mode === 'crew' && alive(id)) mark(id, 'sus');
+          addLog('saw', {who: id, room: a.room, text: `vented${inRoom(a.room)}`});
+        }
+        if (ids.length) said.push(`${andNames(ids)} vented${inRoom(a.room)}`);
+        break;
+      case 'visual': {
+        const clears = state.mode === 'crew' && state.settings.visual;
+        for (const id of ids) {
+          if (clears && alive(id)) mark(id, 'safe');
+          addLog('visual', {who: id, text: clears ? 'Watched them finish a visual task' : 'Did a visual task'});
+          if (a.room && alive(id)) addLog('seen', {who: id, room: a.room});
+        }
+        if (ids.length) said.push(clears ? `${andNames(ids)} cleared by a visual task` : `${andNames(ids)} did a visual task`);
+        if (state.mode === 'crew' && !state.settings.visual) warn.push("Visual tasks are off this game, so that doesn't clear them");
+        break;
+      }
+      case 'eject':
+        for (const id of ids) {
+          const p = P(id);
+          p.s = 'ejected'; p.body = null; p.ejImp = a.imp == null ? null : a.imp;
+          addLog('status', {who: id, text: a.imp === true ? 'Ejected (impostor)' : a.imp === false ? 'Ejected (not an impostor)' : 'Ejected (not shown)'});
+        }
+        if (ids.length) said.push(`${andNames(ids)} ejected${a.imp === true ? ', impostor' : a.imp === false ? ', not an impostor' : ''}`);
+        break;
+      case 'partner':
+        if (state.mode !== 'imp') { warn.push('Partner marks are for impostor games'); break; }
+        ids.forEach(id => { P(id).partner = true; });
+        if (ids.length) said.push(`${andNames(ids)} marked as your partner`);
+        break;
+      case 'claim':
+        join(a.speaker);
+        addLog('claim', {who: a.speaker, text: a.text});
+        said.push(`Logged ${nameOf(a.speaker)}'s claim`);
+        break;
+      case 'note':
+        addLog('note', {text: a.text});
+        said.push('Note added');
+        break;
+      case 'self':
+        addLog('seen', {who: state.me, room: a.room});
+        state.routeFrom = a.room;
+        said.push(`You're in ${a.room}`);
+        break;
+      case 'endmeet':
+        if (state.phase === 'meeting') { endMeeting(); said.push('Back to tasks'); }
+        else warn.push('No meeting is going on');
+        break;
+      case 'meet': {
+        if (state.phase === 'tasks') { startMeeting(); said.push(`Meeting ${state.meetings} started`); }
+        const reps = a.reporters.filter(join);
+        reps.forEach(id => addLog('note', {who: id, text: 'Called the meeting'}));
+        if (reps.length) said.push(`${andNames(reps)} called it`);
+        break;
+      }
+      case 'done': {
+        if (state.mode !== 'imp') { warn.push('"Done" finishes your next stop on the impostor route'); break; }
+        const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+        if (!stops.length) { warn.push('No fake tasks left on your route'); break; }
+        const first = stops[0].steps[0];
+        if (first.wait > 0.5) { warn.push(`${first.t.n} isn't ready yet. Come back in ${fmtLeft(first.wait * 1000)}`); break; }
+        stops[0].steps.forEach(s => completeStep(s.t, s.i, s.key, true));
+        said.push(`Faked ${andList([...new Set(stops[0].steps.map(s => s.t.n))])} in ${stops[0].room}`);
+        break;
+      }
+    }
+  }
+  if (joined.length) said.push(`added ${andList(joined)} to the lobby`);
+  return {said, warn};
+}
+
+/* Undo puts back the whole game as it was before the last voice command,
+   but only if nothing else changed since (switching tabs doesn't count). */
+let voiceSnap = null;
+const coreJSON = () => JSON.stringify({...state, tab: null, logFilter: null, awake: null});
+function voiceUndo(report = true) {
+  if (!voiceSnap) { if (report) showVoiceResult('err', 'Nothing to undo'); return false; }
+  if (coreJSON() !== voiceSnap.after) {
+    voiceSnap = null;
+    if (report) showVoiceResult('err', "Can't undo that. Something else changed since.");
+    return false;
+  }
+  state = JSON.parse(voiceSnap.before);
+  voiceSnap = null; lastFake = null;
+  commit();
+  if (report) showVoiceResult('ok', 'Undone');
+  return true;
+}
+
+function runVoice(text) {
+  const plan = parseCommand(text, voiceCtx());
+  if (!plan.ok) return plan;
+  let acts = plan.actions;
+  if (acts[0].type === 'undo') {
+    plan.logged = voiceUndo(acts.length === 1);
+    acts = acts.slice(1);
+    if (!acts.length) return plan;
+  }
+  const before = JSON.stringify(state);
+  const {said, warn} = applyPlan(acts);
+  commit();
+  const extra = [...warn, ...(plan.warn || [])];
+  plan.logged = said.length > 0;
+  if (said.length) {
+    voiceSnap = {before, after: coreJSON()};
+    showVoiceResult('ok', [...said, ...extra].map(capFirst).join('. '), true);
+    try { navigator.vibrate && navigator.vibrate(40); } catch (e) { /* no vibration here */ }
+  } else {
+    showVoiceResult('err', extra.map(capFirst).join('. ') || "Didn't log anything");
+  }
+  return plan;
+}
+
+function showVoiceResult(kind, msg, undo) {
+  const el = $('#vresult');
+  el.className = 'vresult ' + kind;
+  el.innerHTML = `<span class="vr-msg">${esc(msg)}</span>${undo ? '<button type="button" class="linkbtn" data-action="voiceUndo">Undo</button>' : ''}`;
+  el.hidden = false;
+  clearTimeout(showVoiceResult.h);
+  if (kind !== 'listen') showVoiceResult.h = setTimeout(() => { el.hidden = true; }, kind === 'ok' ? 12000 : 9000);
+}
+
+/* Typing or keyboard dictation. With auto-log on, a complete command logs
+   itself once the text stops changing for a moment. */
+let vTimer = null, composing = false;
+const voiceAuto = () => state.settings.voiceAuto !== false;
+function onVoiceInput() {
+  clearTimeout(vTimer);
+  if (!$('#vlog').value.trim() || !voiceAuto()) return;
+  vTimer = setTimeout(autoVoice, 1300);
+}
+function autoVoice() {
+  if (composing) return;              /* the keyboard is still working on a word */
+  const el = $('#vlog'), text = el.value.trim();
+  if (!text) return;
+  const plan = parseCommand(text, voiceCtx());
+  if (plan.ok) { el.value = ''; runVoice(text); }
+  else if (plan.partial) showVoiceResult('hint', plan.error);
+}
+function submitVoice() {
+  clearTimeout(vTimer);
+  const el = $('#vlog'), text = el.value.trim();
+  if (!text) {
+    showVoiceResult('hint', 'Tap the box, then the mic on your keyboard, and say something like "black in admin".');
+    el.focus();
+    return;
+  }
+  const plan = runVoice(text);
+  if (plan.ok) el.value = '';
+  else showVoiceResult('err', plan.partial ? plan.error : `${plan.error} Try "black in admin".`);
+  el.focus();
+}
+
+/* the "?" sheet: everything you can say, plus this map's rooms */
+let helpOpen = false;
+function shortSay(r) {
+  const all = [...(ROOM_SAYS[r] || []), ...(((ROOM_SAYS_MAP[state.map] || {})[r]) || [])];
+  return all.find(a => a.length <= r.length - 3) || null;
+}
+function renderHelp() {
+  const m = map();
+  const say = list => list.map(s => `<span class="say">${esc(s)}</span>`).join('');
+  const groups = [
+    ['Who you saw', ['black in admin', 'black and red in med bay', 'admin, black']],
+    ['Bodies and kills', ['black dead in electrical', 'red killed black in electrical', 'red vented in nav']],
+    ['Marks', ['red sus', "blue's not sus", 'purple did scan', 'white ejected, not the impostor']],
+    ['Meetings', ['meeting', 'blue reported black dead in storage', 'red says they were in nav', 'back to tasks']],
+    ['Impostor games', ["I'm in electrical", 'done', 'red partner']],
+    ['Mistakes and notes', ['undo', 'undo, black in med bay', 'note yellow followed me']]
+  ];
+  let elsewhere = false;   /* is there a hands-free copy on another site? */
+  try { elsewhere = !!HANDS_FREE_URL && new URL(HANDS_FREE_URL).hostname !== location.hostname; } catch (e) { /* no link */ }
+  const how = handsFreeOK
+    ? `<p><b>Hands-free:</b> tap the mic button next to Log once. It keeps listening and logs whatever you say, like "black in admin". Tap it again to stop. Keep this page open with the screen on.</p>
+       <p class="hint">The first time, your browser asks to use the mic. Chatting that has no player or room in it gets ignored.</p>`
+    : `<p>Tap the box at the top, then the mic on your phone's keyboard, and say what you saw. ${voiceAuto() ? 'It logs by itself when you stop talking.' : 'Tap Log to save it.'} Typing works too.</p>
+       ${elsewhere ? `<p class="hint">Want it fully hands-free? Open <a href="${esc(HANDS_FREE_URL)}" target="_blank" rel="noopener">the hands-free version</a> in Chrome or Safari. It keeps its own saved games.</p>` : ''}`;
+  $('#sheet').innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="vh-title">
+    <div class="sheet-head"><h2 id="vh-title">Voice log</h2><button type="button" class="x" data-action="closeSheet" aria-label="Close">×</button></div>
+    <div class="sec"><h3>How it works</h3>${how}</div>
+    ${handsFreeOK ? `<div class="toggle-row"><span>Tick sound when it logs</span><div class="seg" role="group" aria-label="Tick sound when it logs">
+      <button type="button" data-action="setSetting" data-v="voiceBeep:1" aria-pressed="${voiceBeep()}">On</button>
+      <button type="button" data-action="setSetting" data-v="voiceBeep:0" aria-pressed="${!voiceBeep()}">Off</button></div></div>` : ''}
+    <div class="toggle-row"><span>Typed or dictated: log when I stop</span><div class="seg" role="group" aria-label="Log typed or dictated text when I stop">
+      <button type="button" data-action="setSetting" data-v="voiceAuto:1" aria-pressed="${voiceAuto()}">On</button>
+      <button type="button" data-action="setSetting" data-v="voiceAuto:0" aria-pressed="${!voiceAuto()}">Off</button></div></div>
+    <div class="sec"><h3>Things you can say</h3><dl class="says">${groups.map(([h, list]) => `<div><dt>${esc(h)}</dt><dd>${say(list)}</dd></div>`).join('')}</dl>
+      <p class="hint" style="margin-top:8px">"Done" fakes the next stop on your route. Player names from Setup work as well as colors.</p></div>
+    <div class="sec"><h3>Rooms on ${esc(m.name)}</h3><p class="hint">${esc(m.rooms.map(r => { const s = shortSay(r); return s ? `${r} (${s})` : r; }).join(', '))}</p></div>
+    <p class="hint">In a Discord call? Mute yourself or use push-to-talk first, or the whole lobby hears what you log.</p>
+  </div>`;
+  $('#sheet').hidden = false;
+}
+
+/* =====================================================================
+   HANDS-FREE LISTENING, for browsers that let this page use the mic.
+   Claude's artifact viewer doesn't, so there the button stays hidden and
+   the keyboard's own mic does the listening. The standalone copy on its
+   own website (HANDS_FREE_URL) can ask for the mic.
+
+   Browsers end a listening session after a pause (Android Chrome after
+   every sentence), so each session is a fresh recognizer, and when one
+   ends we start the next. A quick end with nothing heard counts as a
+   failure; several in a row and we stop instead of looping.
+   ===================================================================== */
+const HANDS_FREE_URL = '';
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let handsFreeOK = false, listening = false, rec = null, micOK = false, quickEnds = [], lastHeard = {text: '', t: 0}, pausedByHide = false;
+
+async function initHandsFree() {
+  if (!SpeechRec) return;
+  try {
+    const st = await navigator.permissions.query({name: 'microphone'});
+    if (st.state === 'denied') return;
+  } catch (e) { /* this browser can't say ahead of time, so offer it and see */ }
+  handsFreeOK = true;
+  $('#vb-mic').hidden = false;
+}
+function setListening(on) {
+  const b = $('#vb-mic');
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', on ? 'Stop listening' : 'Listen hands-free');
+  if (on) showVoiceResult('listen', 'Listening. Say something like "black in admin".');
+}
+function startListening() {
+  listening = true; quickEnds = []; pausedByHide = false;
+  primeAudio(); keepAwakeQuietly();
+  setListening(true);
+  spin();
+}
+function stopListening() {
+  listening = false;
+  const r = rec;
+  rec = null;
+  setListening(false);
+  try { if (r) r.stop(); } catch (e) { /* already stopped */ }
+}
+/* one listening session */
+function spin() {
+  if (!listening) return;
+  let r;
+  try { r = new SpeechRec(); } catch (e) {
+    stopListening(); showVoiceResult('err', "Couldn't start listening. Tap the box and use your keyboard's mic instead.");
+    return;
+  }
+  rec = r;
+  r.lang = navigator.language || 'en-US';
+  r.continuous = true; r.interimResults = true; r.maxAlternatives = 5;
+  r._t0 = Date.now(); r._heard = false;
+  r.onaudiostart = () => { micOK = true; };              /* the mic really opened, so permission is fine */
+  r.onspeechstart = () => { r._heard = true; };
+  r.onresult = e => {
+    r._heard = true; micOK = true;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (!res.isFinal) { showVoiceResult('listen', `Hearing "${res[0].transcript.trim()}"`); continue; }
+      heard(Array.from(res, alt => alt.transcript));
+    }
+  };
+  r.onerror = e => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;      /* just silence; onend starts the next session */
+    if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(e.error)) {
+      stopListening();
+      if (!micOK) {
+        /* never got the mic at all: this browser or page blocks it */
+        handsFreeOK = false; $('#vb-mic').hidden = true;
+        showVoiceResult('err', "This browser won't let the page use the mic. Tap the box and use your keyboard's mic instead.");
+      } else {
+        /* the mic worked before; iPhones want a tap to start again */
+        showVoiceResult('err', 'Listening paused. Tap the mic to start again.');
+      }
+      return;
+    }
+    if (e.error === 'network') { stopListening(); showVoiceResult('err', "Can't reach the speech service. Check your connection, then tap the mic."); }
+  };
+  r.onend = () => {
+    if (rec !== r || !listening) return;                 /* we stopped it on purpose */
+    const now = Date.now();
+    if (!r._heard && now - r._t0 < 2000) {
+      quickEnds = quickEnds.filter(t => now - t < 10000);
+      quickEnds.push(now);
+      if (quickEnds.length > 3) { stopListening(); showVoiceResult('err', 'Listening kept cutting out, so it stopped. Tap the mic to try again.'); return; }
+    }
+    spin();
+  };
+  try { r.start(); } catch (e) {
+    stopListening(); showVoiceResult('err', 'Listening paused. Tap the mic to start again.');
+  }
+}
+/* Speech engines send a few guesses; log the first one that makes sense.
+   Anything with no player or room in it is just you talking, so it's
+   ignored quietly instead of throwing an error at every sentence. */
+function heard(alts) {
+  const key = normSpeech(alts[0]);
+  if (!key) return;
+  if (key === lastHeard.text && Date.now() - lastHeard.t < 2500) return;   /* some engines send the same phrase twice */
+  lastHeard = {text: key, t: Date.now()};
+  for (const a of alts) {
+    if (parseCommand(a, voiceCtx()).ok) {
+      const p = runVoice(a);
+      if (p.logged) beep();
+      return;
+    }
+  }
+  const p = parseCommand(alts[0], voiceCtx());
+  if (p.partial) showVoiceResult('hint', `Heard "${alts[0].trim()}". ${p.error}`);
+  else if (listening) showVoiceResult('listen', 'Listening. Say something like "black in admin".');
+}
+
+/* a short tick when something logs, so you don't have to look at the phone.
+   Off by default on iPhone, where playing sound can interrupt listening. */
+let audioCtx = null;
+const voiceBeep = () => state.settings.voiceBeep != null ? state.settings.voiceBeep : !isIOS;
+function primeAudio() {           /* browsers only allow sound after a tap, so this runs on the mic tap */
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { audioCtx = null; }
+}
+function beep() {
+  if (!audioCtx || !voiceBeep()) return;
+  try {
+    const t = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + 0.15);
+  } catch (e) { /* no sound here */ }
+}
+/* listening only works while the screen is on, so keep it on while listening */
+async function keepAwakeQuietly() {
+  if (wakeLock || !('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) { /* not allowed here; the screen may dim on its own */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && listening) { stopListening(); pausedByHide = true; }
+  else if (document.visibilityState === 'visible' && pausedByHide) {
+    pausedByHide = false;
+    showVoiceResult('err', 'Listening stopped while the screen was off. Tap the mic to start again.');
+  }
+});
+
+/* =====================================================================
+   5. ACTIONS. Buttons carry data-action (which function) and data-v
+   (its value). One click listener routes them here.
+   ===================================================================== */
+let armed = null, armTimer = null;
+function arm(name) {
+  if (armed === name) { armed = null; clearTimeout(armTimer); return true; }
+  armed = name; clearTimeout(armTimer);
+  armTimer = setTimeout(() => { armed = null; render(); }, 3500);
+  render();
+  return false;
+}
+function commit() { save(); render(); }
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+const actions = {
+  setMode(v) { state.mode = v; commit(); },
+  tab(v) { state.tab = v; commit(); window.scrollTo({top: 0}); $('#view').focus({preventScroll: true}); },
+  meeting() {
+    if (state.phase === 'tasks') startMeeting(); else endMeeting();
+    commit(); window.scrollTo({top: 0});
+  },
+  openPlayer(id) { sheetFor = id; renderSheet(); const first = $('#sheet .opt'); if (first) first.focus(); },
+  closeSheet() { sheetFor = null; picking = null; helpOpen = false; $('#sheet').hidden = true; $('#sheet').innerHTML = ''; render(); },
+  voiceHelp() { helpOpen = true; renderHelp(); const x = $('#sheet .x'); if (x) x.focus(); },
+  voiceUndo() { voiceUndo(true); },
+  handsFree() { if (listening) stopListening(); else startListening(); },
+  setStatus(v) {
+    const p = P(sheetFor);
+    if (p.s === v) return;
+    p.s = v;
+    if (v !== 'ejected') p.ejImp = null;
+    if (v !== 'dead') p.body = null;
+    if (v === 'ejected') p.ejImp = state.settings.confirm ? null : null;
+    addLog('status', {who: sheetFor, text: statusLabel(v)});
+    commit();
+  },
+  setEjImp(v) {
+    const p = P(sheetFor);
+    p.ejImp = v === 'yes' ? true : v === 'no' ? false : null;
+    addLog('status', {who: sheetFor, text: v === 'yes' ? 'Ejected (impostor)' : v === 'no' ? 'Ejected (not an impostor)' : 'Ejected (not shown)'});
+    commit();
+  },
+  togglePartner() { const p = P(sheetFor); p.partner = !p.partner; commit(); },
+  sawVisual() {
+    const p = P(sheetFor); p.s = 'safe';
+    addLog('visual', {who: sheetFor, text: 'Watched them finish a visual task'});
+    commit(); toast(`${nameOf(sheetFor)} marked cleared`);
+  },
+  logRoom(room) {
+    const id = sheetFor, p = P(id);
+    if (p.s === 'dead' && !p.body) { p.body = room; addLog('body', {who: id, room}); toast(`Body logged in ${room}`); }
+    else { addLog('seen', {who: id, room}); toast(`${nameOf(id)} seen in ${room}`); }
+    sheetFor = null; $('#sheet').hidden = true; $('#sheet').innerHTML = '';
+    commit();
+  },
+  delLog(id) { state.log = state.log.filter(e => e.id !== id); commit(); },
+  logFilter(v) { state.logFilter = v; commit(); },
+  pickClaim(v) { claimWho = claimWho === v ? null : v; render(); const i = $('#claim-input'); if (i && claimWho) i.focus(); },
+  impAdj(v) {
+    const c = critInfo(state);
+    const base = state.impOverride != null ? state.impOverride : c.hi;
+    state.impOverride = Math.max(0, Math.min(state.imps, base + Number(v)));
+    commit();
+  },
+  impAuto() { state.impOverride = null; commit(); },
+  setSetting(v) {
+    const [k, val] = v.split(':');
+    state.settings[k] = k === 'bar' ? val : val === '1';
+    commit();
+  },
+  setImps(v) { state.imps = Number(v); state.impOverride = null; commit(); },
+  setMap(v) { if (state.map === v) return; state.map = v; state.fakes = {}; state.routeFrom = null; lastFake = null; watchSel = null; commit(); toast(`Map: ${MAPS[v].name}`); },
+  toggleColor(id) {
+    const i = state.lobby.indexOf(id);
+    if (i >= 0) {
+      if (state.lobby.length <= 4) { toast('A game needs at least 4 players'); return; }
+      state.lobby.splice(i, 1);
+      if (state.me === id) state.me = state.lobby[0];
+    } else {
+      if (state.lobby.length >= 15) { toast('Lobbies max out at 15 players'); return; }
+      state.lobby.push(id);
+    }
+    commit();
+  },
+  setMe(id) { state.me = id; commit(); },
+  newGame() {
+    if (!arm('newGame')) return;
+    state = newGame(state); state.tab = 'players';
+    commit(); toast('New game started');
+  },
+  resetAll() {
+    if (!arm('resetAll')) return;
+    state = newGame(); commit(); toast('Everything cleared');
+  },
+  freshFromExample() { state = newGame({mode: state.mode, map: state.map, imps: state.imps, settings: state.settings}); commit(); toast('Fresh game. Set your lobby in Setup.'); state.tab = 'setup'; commit(); },
+  addFake(n) {
+    const t = taskByName(n); if (!t) return;
+    const f = {done: t.st.map(() => false), room: t.st.map(() => null), readyAt: null, skip: 0};
+    /* steps whose room comes from the in-game list: ask for those first */
+    const queue = t.st.map((x, i) => (x.pick || (x.wire && i === 0)) ? i : -1).filter(i => i >= 0);
+    if (queue.length) { picking = {n, f, queue}; renderPicker(); return; }
+    state.fakes[n] = f;
+    commit(); toast(`${n} added to your route`);
+  },
+  pickRoom(v) {
+    if (!picking) return;
+    const t = taskByName(picking.n), i = picking.queue.shift();
+    picking.f.room[i] = t.st[i].wire ? Number(v) : v;
+    if (picking.queue.length) { renderPicker(); return; }
+    state.fakes[picking.n] = picking.f;
+    const n = picking.n;
+    picking = null; $('#sheet').hidden = true; $('#sheet').innerHTML = '';
+    commit(); toast(`${n} added to your route`);
+  },
+  removeFake(n) { delete state.fakes[n]; if (lastFake && lastFake.n === n) lastFake = null; commit(); },
+  routeFake(v) {
+    const {t, i, key} = splitStep(v); if (!t) return;
+    const st = t.st[i];
+    startTimer({title: t.n, sub: stageLabel(t, i, key), secs: fakeSeconds(st),
+      note: st.s == null ? 'This one varies, so any believable time works. 8 seconds is a safe middle.' : 'Stand still at the panel. Walk away when it hits zero.',
+      onDone() { completeStep(t, i, key); }});
+  },
+  routeDone(v) { const {t, i, key} = splitStep(v); if (t) completeStep(t, i, key); },
+  routeLater(v) {
+    const names = v.split('|').filter(n => state.fakes[n]);
+    names.forEach(n => { state.fakes[n].skip = (state.fakes[n].skip || 0) + 1; });
+    commit(); toast('Moved that stop later in your route');
+  },
+  routeUndo() {
+    if (!lastFake) return;
+    const f = state.fakes[lastFake.n];
+    if (f) { f.done[lastFake.i] = false; f.room[lastFake.i] = lastFake.prevRoom; f.readyAt = lastFake.prevReady; }
+    state.routeFrom = lastFake.prevFrom;
+    state.log = state.log.filter(e => e.id !== lastFake.logId);
+    lastFake = null;
+    commit();
+  },
+  timerStop() { stopTimer(false); },
+  watchToggle() { watchToggle(); },
+  setAwake(v) { setAwake(v === '1'); }
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (el) {
+    const fn = actions[el.dataset.action];
+    if (fn) { e.preventDefault(); fn(el.dataset.v, el); }
+    return;
+  }
+  if (e.target === $('#sheet')) actions.closeSheet();
+});
+
+document.addEventListener('submit', e => {
+  const form = e.target.closest('[data-form]');
+  if (!form) return;
+  e.preventDefault();
+  if (form.dataset.form === 'voice') { submitVoice(); return; }
+  const input = form.querySelector('input');
+  const text = input.value.trim();
+  if (!text) return;
+  const kind = form.dataset.form;
+  if (kind === 'playerNote') { addLog('note', {who: sheetFor, text}); commit(); toast('Note added'); return; }
+  if (kind === 'note') { addLog('note', {text}); commit(); $('#note-input').focus(); return; }
+  if (kind === 'story') { addLog('mine', {text}); commit(); $('#story-input').focus(); return; }
+  if (kind === 'claim') {
+    if (!claimWho) { toast('Pick who is talking first'); return; }
+    addLog('claim', {who: claimWho, text}); commit(); $('#claim-input').focus(); return;
+  }
+});
+
+document.addEventListener('compositionstart', e => { if (e.target.id === 'vlog') composing = true; });
+document.addEventListener('compositionend', e => { if (e.target.id === 'vlog') { composing = false; onVoiceInput(); } });
+document.addEventListener('input', e => {
+  if (e.target.id === 'vlog') onVoiceInput();
+  if (e.target.id === 'task-q') filterTasks(e.target.value);
+  if (e.target.dataset && e.target.dataset.name) {
+    const v = e.target.value.trim();
+    if (v) state.names[e.target.dataset.name] = v; else delete state.names[e.target.dataset.name];
+    save(); renderChrome();
+  }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'watch-task') { watchSel = e.target.value; watch.verdict = null; render(); }
+  if (e.target.id === 'route-from') { state.routeFrom = e.target.value; commit(); }
+  if (e.target.dataset && e.target.dataset.name) render();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('#timer').hidden) stopTimer(false);
+  else if (sheetFor || picking || helpOpen) actions.closeSheet();
+});
+
+/* =====================================================================
+   6. TIMERS. The fake-task countdown and the crew stopwatch both use
+   Date.now(), so they stay accurate even when the phone throttles.
+   ===================================================================== */
+let timer = null;
+function startTimer({title, sub, secs, note, onDone}) {
+  stopTimer(false);
+  const box = $('#timer');
+  box.classList.remove('done');
+  $('#timer-title').textContent = title;
+  $('#timer-sub').textContent = sub;
+  $('#timer-note').textContent = note;
+  $('#timer-kicker').textContent = 'Hold at the panel';
+  box.hidden = false;
+  const C = 326.73, total = secs * 1000, t0 = Date.now();
+  const draw = () => {
+    const left = Math.max(0, total - (Date.now() - t0));
+    $('#timer-num').textContent = (Math.ceil(left / 100) / 10).toFixed(1);
+    $('#timer-prog').setAttribute('stroke-dashoffset', String(C * (1 - left / total)));
+    if (left <= 0) {
+      clearInterval(timer.h);
+      box.classList.add('done');
+      $('#timer-kicker').textContent = 'Done';
+      $('#timer-note').textContent = 'Walk away like you finished it.';
+      try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {}
+      onDone && onDone();
+      timer.close = setTimeout(() => stopTimer(true), 1400);
+    }
+  };
+  timer = {h: setInterval(draw, 100)};
+  draw();
+  box.querySelector('button').focus();
+}
+function stopTimer() {
+  if (!timer) { $('#timer').hidden = true; return; }
+  clearInterval(timer.h); clearTimeout(timer.close);
+  timer = null;
+  $('#timer').hidden = true;
+}
+
+let watchSel = null;
+const watch = {running: false, t0: 0, elapsed: 0, h: null, verdict: null};
+function watchToggle() {
+  if (!watch.running) {
+    watch.running = true; watch.t0 = Date.now(); watch.elapsed = 0; watch.verdict = null;
+    watch.h = setInterval(() => { watch.elapsed = (Date.now() - watch.t0) / 1000; const n = $('#watch-num'); if (n) n.textContent = watch.elapsed.toFixed(1); }, 100);
+    render();
+    return;
+  }
+  clearInterval(watch.h); watch.running = false;
+  watch.elapsed = (Date.now() - watch.t0) / 1000;
+  const sel = $('#watch-task') ? $('#watch-task').value : watchSel;
+  watchSel = sel;
+  watch.verdict = judge(watch.elapsed, sel);
+  render();
+}
+function judge(elapsed, sel) {
+  if (!sel) return {lvl: 'warn', text: 'Pick the task they were doing.'};
+  const [n, i] = sel.split('|');
+  const t = taskByName(n); if (!t) return null;
+  const x = t.st[Number(i)];
+  const [lo, hi] = Array.isArray(x.s) ? x.s : [x.s, x.s];
+  const took = `${elapsed.toFixed(1)}s`, real = fmtSecs(x.s);
+  if (elapsed < lo * 0.6) return {lvl: 'bad', text: `${took} is way too fast. A real ${n} takes ${real}. Sus.`};
+  if (elapsed < lo - 0.6) return {lvl: 'warn', text: `${took} is a little fast for ${n} (${real}). Keep an eye on them.`};
+  if (elapsed <= hi + 4) return {lvl: 'ok', text: `${took} checks out for ${n} (${real}).`};
+  return {lvl: 'warn', text: `${took} is long for ${n} (${real}). Could be faking, could be a slow player.`};
+}
+
+/* keep the phone screen on during a game, where the browser allows it */
+let wakeLock = null;
+async function setAwake(on) {
+  try {
+    if (on) {
+      if (!('wakeLock' in navigator)) throw new Error('unsupported');
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+      state.awake = true; toast('Screen will stay on while this page is open');
+    } else {
+      if (wakeLock) await wakeLock.release();
+      wakeLock = null; state.awake = false;
+    }
+  } catch (e) {
+    state.awake = false; toast("This browser won't keep the screen on here");
+  }
+  commit();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state && state.awake && !wakeLock) setAwake(true);
+});
+
+/* refresh "seen 3m ago" text once a minute while nothing is being typed */
+/* the voice box sits outside the re-rendered area, so typing there doesn't count as busy */
+const isBusy = () => (document.activeElement && document.activeElement.id !== 'vlog'
+    && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))
+  || sheetFor || picking || helpOpen || !$('#timer').hidden || watch.running;
+setInterval(() => { if (!isBusy()) render(); }, 60000);
+
+/* count down "come back in 0:42" once a second; re-plan when one runs out */
+setInterval(() => {
+  let ranOut = false;
+  document.querySelectorAll('[data-ready]').forEach(el => {
+    const left = Number(el.dataset.ready) - Date.now();
+    el.textContent = fmtLeft(left);
+    if (left <= 0 && !el.dataset.fired) { el.dataset.fired = '1'; ranOut = true; }
+  });
+  if (ranOut && !isBusy()) render();
+}, 1000);
+
+/* =====================================================================
+   7. BOOT. Restore a saved game, or open the example game.
+   ===================================================================== */
+function start(data) {
+  state = (data && data.state) || load() || exampleGame();
+  if (!MAPS[state.map]) state.map = 'skeld';
+  state.awake = false;
+  /* games saved by an older version: give each fake task the newer fields */
+  for (const [n, f] of Object.entries(state.fakes || {})) {
+    const t = (MAPS[state.map].tasks || []).find(x => x.n === n);
+    if (!t) { delete state.fakes[n]; continue; }
+    f.done = t.st.map((_, i) => !!(f.done && f.done[i]));
+    f.room = t.st.map((_, i) => (f.room && f.room[i] != null) ? f.room[i] : null);
+  }
+  render();
+  initHandsFree();
+}
+window.claude?.hot?.snapshot?.(() => ({state}));
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+</script>
+
+</body>
+</html>
