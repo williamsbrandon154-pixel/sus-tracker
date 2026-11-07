@@ -652,7 +652,7 @@ function newGame(prev) {
     awake: false,
     players: {},
     phase: 'tasks', round: 1, meetings: 0,
-    log: [], fakes: {}, impOverride: null, routeFrom: null,
+    log: [], fakes: {}, mine: {}, impOverride: null, routeFrom: null,
     tab: p.tab || 'players', logFilter: 'all',
     example: false, started: Date.now()
   };
@@ -789,7 +789,7 @@ function critInfo(s) {
 function lastSeen(id) {
   for (let i = state.log.length - 1; i >= 0; i--) {
     const e = state.log[i];
-    if (e.who === id && (e.k === 'seen' || e.k === 'body' || (e.k === 'saw' && e.room))) return e;
+    if (e.who === id && (e.k === 'seen' || e.k === 'body' || ((e.k === 'saw' || e.k === 'task') && e.room))) return e;
   }
   return null;
 }
@@ -857,7 +857,7 @@ function stepOptions(t, i, rooms) {
   const st = t.st[i];
   if (st.wire) {
     if (rooms[i] != null) return [{room: t.panels[rooms[i]], key: rooms[i]}];
-    const prev = i === 0 ? -1 : rooms[i - 1];
+    const prev = i === 0 ? -1 : rooms[i - 1] != null ? rooms[i - 1] : i - 1;   /* an unknown earlier panel: assume the earliest */
     const left = t.st.length - i;                /* panels still needed, this one included */
     const out = [];
     for (let j = prev + 1; j <= t.panels.length - left; j++) out.push({room: t.panels[j], key: j});
@@ -1099,6 +1099,7 @@ function viewMeeting() {
   const claimsNow = state.log.filter(e => e.k === 'claim' && e.ph === ph);
   const lastRound = 'R' + (state.phase === 'meeting' ? state.meetings : state.round);
   const story = state.log.filter(e => (e.k === 'fake' || e.k === 'mine') && (e.ph === lastRound || e.ph === ph));
+  const myDid = state.log.filter(e => e.k === 'task' && (e.ph === lastRound || e.ph === ph));
   const stepper = `<div class="stepper" role="group" aria-label="Adjust impostors left">
       <button type="button" data-action="impAdj" data-v="-1" aria-label="One fewer impostor">−</button>
       <button type="button" data-action="impAdj" data-v="1" aria-label="One more impostor">+</button>
@@ -1140,7 +1141,10 @@ function viewMeeting() {
       ${dead.length ? `<p class="eyebrow" style="margin:12px 0 6px">Bodies</p><ul class="wlist">${dead.map(id => `<li>${swatch(id, 'sm')}<div class="meta"><span class="who">${esc(nameOf(id))}</span><span class="where">${esc(P(id).body || 'location not logged')}</span></div><span></span></li>`).join('')}</ul>` : ''}
     </section>
 
-    ${crewSide ? '' : `<section class="card">
+    ${crewSide ? `<section class="card">
+      <div class="card-head"><h2>What you did</h2><span class="sub">${esc(phaseName(lastRound))}</span></div>
+      ${myDid.length ? `<ul class="events">${myDid.map(eventRow).join('')}</ul>` : '<p class="empty">Tasks you check off show up here with their rooms, so you can say exactly where you were. Say "did swipe card" as you finish one.</p>'}
+    </section>` : `<section class="card">
       <div class="card-head"><h2>Your story</h2><span class="sub">Keep it consistent</span></div>
       ${story.length ? `<ul class="events">${story.map(eventRow).join('')}</ul>` : '<p class="empty">Tasks you fake on the Tasks tab show up here, so your story matches what you did.</p>'}
       <form class="row" data-form="story" style="margin-top:10px"><input type="text" id="story-input" placeholder="What I'll say I did" autocomplete="off" maxlength="160"><button class="btn" type="submit">Add</button></form>
@@ -1214,7 +1218,7 @@ function viewTasks() {
       <div class="t-name">${esc(t.n)} ${badges.join('')}</div>
       <div class="t-chain">${esc(chainText(t))}${t.tip ? `<br><span class="hint">${esc(t.tip)}</span>` : ''}</div>
       <div class="t-side"><span class="t-time">${esc(timeText(t))}</span>
-        ${crewSide ? '' : `<button type="button" class="btn sm ${added ? 'ghost' : ''}" data-action="${added ? 'removeFake' : 'addFake'}" data-v="${esc(t.n)}">${added ? 'Added' : 'Add'}</button>`}</div>
+        ${crewSide ? mineBtn(t) : `<button type="button" class="btn sm ${added ? 'ghost' : ''}" data-action="${added ? 'removeFake' : 'addFake'}" data-v="${esc(t.n)}">${added ? 'Added' : 'Add'}</button>`}</div>
     </li>`;
   }).join('');
 
@@ -1223,7 +1227,7 @@ function viewTasks() {
     .map(([k, label]) => `<div class="tgroup"><h3>${label} · ${byType[k].length}</h3><ul class="tlist">${rows(byType[k])}</ul></div>`).join('');
 
   return `${exampleBanner()}
-    ${crewSide ? watchCard : fakeCard}
+    ${crewSide ? mineCard() + watchCard : fakeCard}
     <section class="card"><div class="card-head"><h2>${esc(m.name)}</h2><span class="sub">Cheat sheet · match these to your lobby</span></div>${toggles}<dl class="facts">${facts}</dl></section>
     <section class="card">
       <div class="card-head"><h2>All tasks</h2><span class="sub">* = rough time</span></div>
@@ -1341,6 +1345,121 @@ function completeStep(t, i, key, quiet) {
   if (!quiet) commit();
 }
 
+/* ---- Checking off tasks, by voice or by tapping Done ----
+   A crewmate's real tasks live in state.mine, an impostor's fakes in
+   state.fakes. Both have the same shape: done[i] and room[i] for each step. */
+const blankTask = t => ({done: t.st.map(() => false), room: t.st.map(() => null), readyAt: null, skip: 0});
+const doneCount = () => Object.entries(state.mine).filter(([n, f]) => taskByName(n) && f.done.every(Boolean)).length;
+
+/* "Swipe Card in Admin", "Upload Data: download in Cafeteria", "Fix Wiring (2nd panel)" */
+function stepText(t, i, key) {
+  const st = t.st[i], room = stageRoom(t, i, key), where = room ? ` in ${room}` : '';
+  if (t.st.length === 1) return t.n + where;
+  if (st.wire) return room ? `${t.n} in ${room}` : `${t.n} (${ORD[i]} panel)`;
+  return `${t.n}: ${st.d || `${ORD[i]} step`}${where}`;
+}
+const stepName = (t, i) => t.st.length === 1 ? t.n : `${t.n} (${t.st[i].d || `${ORD[i]} ${t.st[i].wire ? 'panel' : 'step'}`})`;
+
+/* Which steps "did <task>" covers, and the key to store for each one.
+   a.i is a step the words named ("download" is 0, "upload" the last one),
+   a.room is a room you named, a.first means you said "started". With none of
+   those, wiring goes one panel at a time and any other task counts as
+   finished. The steps before the one you did had to happen first, so they
+   get checked too. */
+function stepsFor(t, f, a) {
+  const open = t.st.map((_, i) => i).filter(i => !f.done[i]);
+  if (!open.length) return {err: `${t.n} is already ${state.mode === 'imp' ? 'faked' : 'checked off'}`};
+  /* the key for step i in room r, or undefined when step i can't happen there */
+  const keyIn = (i, r) => {
+    const st = t.st[i];
+    if (!st.wire) return st.r.includes(r) ? r : undefined;
+    let lo = i;                                    /* panels go in order, after the last one we know */
+    for (let k = i - 1; k >= 0; k--) if (f.room[k] != null) { lo = f.room[k] + (i - k); break; }
+    for (let j = lo; j <= t.panels.length - (t.st.length - i); j++) if (t.panels[j] === r) return j;
+    return undefined;
+  };
+  const oneAtATime = a.first || t.st.some(s => s.wire);
+  let target = oneAtATime ? open[0] : open[open.length - 1], key = null, warn = null;
+  if (a.i != null) {
+    if (f.done[a.i]) return {err: `You already did ${stepName(t, a.i)}`};
+    target = a.i;
+    if (a.room) { const k = keyIn(target, a.room); if (k === undefined) warn = `${stepName(t, target)} isn't in ${a.room}`; else key = k; }
+  } else if (a.room) {
+    const hit = open.find(i => keyIn(i, a.room) !== undefined);
+    if (hit == null) warn = `${t.n} doesn't happen in ${a.room}`;
+    else { target = hit; key = keyIn(hit, a.room); }
+  }
+  return {steps: open.filter(i => i <= target).map(i => ({i, key: i === target ? key : null})), warn};
+}
+
+/* Check off a task you said or tapped. Returns {msg, warn}, or {warn} alone if nothing changed. */
+function doTask(t, a) {
+  const imp = state.mode === 'imp', book = imp ? state.fakes : state.mine;
+  const isNew = !book[t.n], f = book[t.n] || blankTask(t);
+  const pick = stepsFor(t, f, a);
+  if (pick.err) return {warn: pick.err};
+  /* rooms your route already planned, for steps you didn't name a room for */
+  const planned = {};
+  if (imp && !isNew) for (const s of planRoute(map(), state.fakes, routeStart(), Date.now())) if (s.t.n === t.n) planned[s.i] = s.key;
+  book[t.n] = f;
+  for (const {i, key} of pick.steps) {
+    const k = key != null ? key : planned[i] != null ? planned[i] : resolvedKey(t, f, i);
+    if (imp) { completeStep(t, i, k, true); continue; }
+    f.done[i] = true; f.room[i] = k;
+    const room = stageRoom(t, i, k);
+    addLog('task', {who: state.me, room, n: t.n, text: stepText(t, i, k)});
+    if (room) state.routeFrom = room;
+  }
+  const last = pick.steps[pick.steps.length - 1].i, all = f.done.every(Boolean), k = f.done.filter(Boolean).length;
+  const what = all && t.st.length > 1 ? t.n : stepText(t, last, f.room[last]);
+  let msg = `${imp ? 'Faked' : 'Did'} ${what}${all ? '' : ` (${k} of ${t.st.length})`}`;
+  if (imp) {
+    const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+    msg += stops.length ? `. Next stop: ${stops[0].room}` : '. Every fake task is done';
+  } else if (all) msg += `. ${doneCount()} ${plural(doneCount(), 'task')} done`;
+  return {msg, warn: pick.warn};
+}
+
+/* "what did I do": what you've checked off (or faked), and what's half done */
+function taskSummary() {
+  const imp = state.mode === 'imp', book = imp ? state.fakes : state.mine;
+  const done = [], part = [], todo = [];
+  for (const [n, f] of Object.entries(book)) {
+    const t = taskByName(n); if (!t) continue;
+    const k = f.done.filter(Boolean).length;
+    if (k === t.st.length) done.push(n); else if (k) part.push(`${n} ${k}/${t.st.length}`); else todo.push(n);
+  }
+  if (!done.length && !part.length && !todo.length)
+    return imp ? 'No fake tasks yet. Add them on the Tasks tab, or say "did swipe card" as you fake one' : 'Nothing checked off yet. Say "did swipe card" when you finish one';
+  const out = [];
+  if (done.length) out.push(`${imp ? 'Faked' : 'Done'}: ${andList(done)}`);
+  if (part.length) out.push(`Started: ${andList(part)}`);
+  if (todo.length) out.push(`Still to fake: ${andList(todo)}`);
+  return out.join('. ');
+}
+
+/* ---- My tasks (crewmate) ---- */
+function mineCard() {
+  const names = Object.keys(state.mine).filter(n => taskByName(n));
+  const head = `<div class="card-head"><h2>My tasks</h2><span class="sub">${names.length ? `${doneCount()} done` : 'Check off what you finish'}</span></div>`;
+  if (!names.length) return `<section class="card">${head}
+    <p class="empty">Say "did swipe card" when you finish a task, or tap Done next to it below. What you check off shows up in meetings with the room, so you can say exactly where you were.</p></section>`;
+  return `<section class="card">${head}<ul class="tlist">${names.map(n => {
+    const t = taskByName(n), f = state.mine[n], k = f.done.filter(Boolean).length, all = k === t.st.length;
+    const chain = t.st.map((x, i) => `${f.done[i] ? '✓ ' : ''}${stageLabel(t, i, f.room[i])}`).join(' → ');
+    return `<li class="trow"><div class="t-name">${esc(n)} <span class="tag ${all ? 'st-safe' : ''}">${all ? 'Done' : `${k}/${t.st.length}`}</span></div>
+      <div class="t-chain">${esc(chain)}</div>
+      <div class="t-side">${all ? '' : `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(n)}">${t.st.some(s => s.wire) ? 'Next panel' : 'Finish'}</button>`}
+        <button type="button" class="btn ghost sm" data-action="mineClear" data-v="${esc(n)}">Remove</button></div></li>`;
+  }).join('')}</ul></section>`;
+}
+/* the Done button on each row of All tasks */
+function mineBtn(t) {
+  const f = state.mine[t.n], k = f ? f.done.filter(Boolean).length : 0;
+  if (f && k === t.st.length) return `<button type="button" class="btn ghost sm" data-action="mineClear" data-v="${esc(t.n)}" aria-pressed="true" aria-label="Uncheck ${esc(t.n)}">Done ✓</button>`;
+  return `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(t.n)}">${k ? `Done ${k}/${t.st.length}` : 'Done'}</button>`;
+}
+
 /* ---- Log ---- */
 function eventText(e) {
   const who = e.who ? nameOf(e.who) : '';
@@ -1352,6 +1471,7 @@ function eventText(e) {
     case 'status': return `${who} marked ${e.text}`;
     case 'saw': return `${who} ${e.text}`;
     case 'fake': return `Faked ${e.text}`;
+    case 'task': return `Did ${e.text}`;
     case 'mine': return `My story: ${e.text}`;
     default: return who ? `${who}: ${e.text}` : e.text;
   }
@@ -1535,6 +1655,111 @@ const ROOM_SAYS = {
 /* short names that only make sense on one map ("engine" on The Fungle) */
 const ROOM_SAYS_MAP = {fungle: {'Upper Engine': ['engine', 'engines']}};
 
+/* What people call each task. Each line is the words, then the tasks they can
+   mean; the first one on the current map wins, so "samples" is Inspect Sample
+   on The Skeld but Sort Samples on MIRA HQ. {n, i} also names a step: 0 is the
+   first, 'last' the last ("download" vs "upload"). A task's full name always
+   works too. Words in the past tense ("swiped", "uploaded") count as done on
+   their own; anything else needs "did", "done" or "finished" with it. Words
+   that are room names ("reactor", "shields") stay rooms, and "did reactor"
+   finds Start Reactor through the room instead (taskInRoom below). */
+const TASK_SAYS = [
+  [['wires', 'wire', 'wiring', 'the wires', 'fix wires', 'fixed wires', 'fixed wiring', 'fixed the wires'], ['Fix Wiring']],
+  [['card', 'swipe', 'swiped', 'swiping', 'card swipe', 'swiped card', 'swiped the card', 'swipe the card', 'swiped my card'], ['Swipe Card', 'Enter Id Code']],
+  [['download', 'downloaded', 'downloading', 'download data', 'downloaded data'], [{n: 'Upload Data', i: 0}]],
+  [['upload', 'uploaded', 'uploading', 'uploaded data'], [{n: 'Upload Data', i: 'last'}]],
+  [['data', 'the data'], ['Upload Data', 'Process Data']],
+  [['process', 'processed data'], ['Process Data']],
+  [['asteroid', 'shot asteroids', 'shoot asteroids', 'cleared asteroids', 'cleared the asteroids'], ['Clear Asteroids']],
+  [['fuel', 'fueled', 'fuelled', 'fueling', 'fuel engine', 'fuel the engines', 'fueled the engines', 'gas', 'gas can', 'fuel can'], ['Fuel Engines', 'Extract Fuel']],
+  [['extract', 'extracted fuel'], ['Extract Fuel']],
+  [['sample', 'samples', 'inspect', 'inspected sample', 'inspected the sample', 'the sample'], ['Inspect Sample', 'Sort Samples', 'Collect Samples']],
+  /* "reactor", "shields" and "o2" only reach these where they aren't a room (Start Reactor is in Specimen Room on Polus) */
+  [['reactor', 'simon says', 'reactor task', 'start the reactor', 'started reactor', 'started the reactor'], ['Start Reactor']],
+  [['shields'], ['Prime Shields']],
+  [['o2'], ['Clean O2 Filter']],
+  [['med scan', 'medbay scan', 'body scan', 'my scan'], ['Submit Scan']],
+  [['distributor', 'calibrate', 'calibrated', 'calibrated distributor', 'calibrated the distributor'], ['Calibrate Distributor']],
+  [['course', 'chart', 'charted course', 'charted the course', 'chart the course'], ['Chart Course']],
+  [['filter', 'o2 filter', 'oxygen filter', 'clean filter', 'cleaned filter', 'cleaned the filter', 'leaves'], ['Clean O2 Filter']],
+  [['clean vent', 'cleaned vent', 'clean the vent', 'cleaned the vent', 'cleaned a vent'], ['Clean Vent']],
+  [['divert', 'diverted'], [{n: 'Divert Power', i: 0}]],
+  [['power', 'diverted power', 'diverted the power'], ['Divert Power']],
+  [['accept', 'accepted', 'accept power', 'accepted power', 'accepted the power'], [{n: 'Divert Power', i: 'last'}]],
+  [['prime', 'primed', 'primed shields', 'primed the shields', 'shields task'], ['Prime Shields']],
+  [['steering', 'stabilize', 'stabilized', 'stabilized steering', 'stabilized the steering'], ['Stabilize Steering']],
+  [['manifolds', 'manifold', 'unlocked manifolds', 'unlocked the manifolds'], ['Unlock Manifolds']],
+  [['unlock', 'unlocked'], ['Unlock Manifolds', 'Unlock Safe']],
+  [['align engine', 'align engines', 'aligned engine', 'aligned engines', 'aligned the engines', 'engine output', 'align output', 'output'], ['Align Engine Output']],
+  [['align', 'aligned'], ['Align Engine Output', 'Align Telescope']],
+  [['id code', 'enter id', 'enter code', 'entered code', 'entered the code', 'code', 'the code'], ['Enter Id Code']],
+  [['plants', 'watered plants', 'watered the plants', 'water the plants', 'watering can'], ['Water Plants']],
+  [['artifact', 'artifacts'], ['Assemble Artifact', 'Store Artifacts']],
+  [['assembled artifact', 'assembled the artifact'], ['Assemble Artifact']],
+  [['beverage', 'drink', 'soda', 'vending machine', 'bought a drink', 'buy a drink'], ['Buy Beverage']],
+  [['weather', 'measured weather', 'measured the weather'], ['Measure Weather', 'Fix Weather Node']],
+  [['weather node', 'node', 'nodes', 'fixed weather node', 'fixed the node'], ['Fix Weather Node']],
+  [['diagnostics', 'diagnostic', 'ran diagnostics'], ['Run Diagnostics']],
+  [['keys', 'key', 'inserted keys', 'inserted the keys', 'insert key'], ['Insert Keys']],
+  [['boarding pass', 'pass', 'scanned boarding pass', 'scanned my boarding pass'], ['Scan Boarding Pass']],
+  [['waterways', 'waterway', 'wheels', 'wheel', 'valves', 'valve', 'opened waterways', 'opened the waterways'], ['Open Waterways']],
+  [['wifi', 'wi fi', 'reboot', 'rebooted', 'rebooted wifi', 'rebooted the wifi', 'router'], ['Reboot Wifi']],
+  [['water jug', 'jug', 'water bottle', 'replaced jug', 'replaced the jug', 'replaced water jug'], ['Replace Water Jug']],
+  [['telescope', 'aligned telescope', 'aligned the telescope'], ['Align Telescope']],
+  [['canisters', 'canister', 'filled canisters', 'filled the canisters'], ['Fill Canisters']],
+  [['tree', 'monitored tree', 'monitored the tree', 'oxygen tree'], ['Monitor Tree']],
+  [['monitor', 'monitored'], ['Monitor Tree', 'Monitor Mushroom']],
+  [['temperature', 'temp', 'thermometer', 'recorded temperature', 'recorded the temperature'], ['Record Temperature']],
+  [['drill', 'repaired drill', 'repaired the drill', 'fixed drill', 'fixed the drill'], ['Repair Drill']],
+  [['stored artifacts', 'stored the artifacts'], ['Store Artifacts']],
+  [['photos', 'photo', 'pictures', 'developed photos', 'developed the photos'], ['Develop Photos']],
+  [['breakers', 'breaker', 'reset the breakers'], ['Reset Breakers']],
+  [['tapes', 'tape', 'rewind', 'rewound tapes', 'rewound the tapes'], ['Rewind Tapes']],
+  [['fans', 'fan', 'started fans', 'started the fans'], ['Start Fans']],
+  [['unlock the safe', 'unlocked the safe', 'unlocked safe', 'open the safe', 'opened the safe', 'cracked the safe', 'crack the safe'], ['Unlock Safe']],
+  [['toilet', 'toilets', 'cleaned toilet', 'cleaned the toilet', 'bathroom'], ['Clean Toilet']],
+  [['decontaminate', 'decontaminated', 'decon'], ['Decontaminate']],
+  [['mannequin', 'dressed mannequin', 'dressed the mannequin'], ['Dress Mannequin']],
+  [['fix shower', 'fix the shower', 'fixed shower', 'fixed the shower', 'shower head'], ['Fix Shower']],
+  [['burger', 'burgers', 'hamburger', 'made burger', 'made a burger', 'make a burger', 'made the burger'], ['Make Burger']],
+  [['towels', 'towel', 'picked up towels', 'picked up the towels'], ['Pick Up Towels']],
+  [['ruby', 'polished ruby', 'polished the ruby'], ['Polish Ruby']],
+  [['polish', 'polished'], ['Polish Ruby', 'Polish Gem']],
+  [['pistols', 'pistol', 'put away pistols', 'put away the pistols'], ['Put Away Pistols']],
+  [['rifles', 'rifle', 'put away rifles', 'put away the rifles'], ['Put Away Rifles']],
+  [['sorted records', 'sorted the records', 'filed records'], ['Sort Records']],
+  [['parts', 'replaced parts', 'replaced the parts'], ['Replace Parts']],
+  [['marshmallow', 'marshmallows', 'roasted marshmallow', 'roasted a marshmallow', 'smores'], ['Roast Marshmallow']],
+  [['fish', 'fishing', 'caught fish', 'caught the fish'], ['Catch Fish']],
+  [['vegetables', 'vegetable', 'veggies', 'veggie', 'collected vegetables'], ['Collect Vegetables']],
+  [['critter', 'egg', 'hatched the egg', 'helped critter', 'helped the critter'], ['Help Critter']],
+  [['hoist', 'hoisted', 'supplies', 'rope', 'hoisted supplies'], ['Hoist Supplies']],
+  [['ores', 'ore', 'mined ores', 'mined the ores'], ['Mine Ores']],
+  [['gem', 'gems', 'polished gem', 'polished the gem'], ['Polish Gem']],
+  [['sandcastle', 'sand castle', 'built sandcastle', 'built a sandcastle', 'built the sandcastle'], ['Build Sandcastle']],
+  [['shells', 'seashells', 'collected shells'], ['Collect Shells']],
+  [['generator', 'crank', 'cranked generator', 'cranked the generator'], ['Crank Generator']],
+  [['signal', 'found signal', 'found the signal'], ['Find Signal']],
+  [['antenna', 'fixed antenna', 'fixed the antenna'], ['Fix Antenna']],
+  [['weights', 'lifted weights', 'lifting'], ['Lift Weights']],
+  [['mushroom', 'mushrooms', 'monitored mushroom', 'monitored the mushroom'], ['Monitor Mushroom']],
+  [['video game', 'video games', 'played video game', 'played the video game', 'arcade'], ['Play Video Game']],
+  [['frisbee', 'threw frisbee', 'threw the frisbee'], ['Throw Frisbee']]
+];
+/* past tense means it already happened, so "uploaded in admin" needs no "did" */
+const PAST = /\b(?:\w+ed|made|built|threw|caught|rewound|shot|bought|found|ran)\b/;
+
+/* "did reactor": the task named after that room (Start Reactor), else the
+   only task with a fixed step there. null when it could be more than one. */
+function taskInRoom(mp, room) {
+  if (!room) return null;
+  const stem = s => normSpeech(s).split(' ').filter(w => w.length > 1 && w !== 'the').map(w => w.replace(/s$/, ''));
+  const rw = new Set(stem(room)), tasks = mp.tasks || [];
+  let hits = tasks.filter(t => stem(t.n).some(w => rw.has(w)));
+  if (hits.length !== 1) hits = tasks.filter(t => t.st.some(s => !s.wire && !s.pick && s.r.length === 1 && s.r[0] === room));
+  return hits.length === 1 ? hits[0].n : null;
+}
+
 /* word lists. A phrase is matched before the single words inside it. */
 const tokens = (list, tok) => list.map(p => [p, tok]);
 const SAY_PHRASES = [
@@ -1546,9 +1771,22 @@ const SAY_PHRASES = [
   ...tokens(['voted out', 'kicked out', 'thrown out', 'got voted out', 'got ejected', 'was ejected', 'got voted'], {t: 'kw', k: 'ejected'}),
   ...tokens(['killed by', 'murdered by', 'stabbed by', 'shot by', 'got killed by', 'was killed by'], {t: 'kw', k: 'kill', passive: true}),
   ...tokens(['dead body', 'found dead'], {t: 'kw', k: 'dead'}),
-  ...tokens(['did scan', 'did the scan', 'did a scan', 'did their scan', 'did his scan', 'did her scan', 'did asteroids',
-    'did the asteroids', 'did shields', 'did the shields', 'did trash', 'did the trash', 'did garbage', 'did the garbage',
-    'took out the trash', 'did visual', 'did a visual', 'did the visual', 'visual task'], {t: 'kw', k: 'visual'}),
+  /* visual tasks: "purple did scan" clears purple, while "did scan" on its own is your own Submit Scan */
+  ...tokens(['did scan', 'did the scan', 'did a scan', 'did their scan', 'did his scan', 'did her scan', 'did my scan'], {t: 'kw', k: 'visual', task: ['Submit Scan'], past: true}),
+  ...tokens(['did asteroids', 'did the asteroids'], {t: 'kw', k: 'visual', task: ['Clear Asteroids'], past: true}),
+  ...tokens(['did shields', 'did the shields'], {t: 'kw', k: 'visual', task: ['Prime Shields'], past: true}),
+  ...tokens(['did trash', 'did the trash', 'did garbage', 'did the garbage', 'took out the trash'], {t: 'kw', k: 'visual', task: ['Empty Garbage', 'Empty Chute'], past: true}),
+  ...tokens(['did visual', 'did a visual', 'did the visual', 'visual task'], {t: 'kw', k: 'visual'}),
+  ...tokens(['new game', 'restart game', 'restart the game', 'reset game', 'reset the game', 'start a new game', 'start new game',
+    'started a new game', 'play again', 'playing again', 'new match'], {t: 'newgame'}),
+  /* "I did ..." is always about you, even right after someone else */
+  ...tokens(['i did', 'i just did', 'i have done', 'ive done', 'i done'], {t: 'done', weak: true, me: true}),
+  ...tokens(['i finished', 'i just finished', 'i completed', 'i just completed'], {t: 'done', me: true}),
+  /* questions and "not done" aren't reports, so these use up the words without checking anything off */
+  ...tokens(['did you', 'did u', 'did ya', 'did they', 'did he', 'did she', 'did we', 'did anyone', 'did anybody', 'did someone',
+    'did somebody', 'who did', 'where did', 'when did', 'why did', 'how did', 'what did', 'did not', 'never did', 'not done',
+    'isnt done', 'arent done', 'havent done', 'not finished', 'havent finished', 'still doing', 'are you done', 'you done',
+    'u done', 'yall done', 'are you finished', 'of course'], {t: 'stop'}),
   ...tokens(['came out of a vent', 'came out of vent', 'out of a vent', 'in a vent', 'jumped in a vent', 'jumped in vent', 'jumped into a vent'], {t: 'kw', k: 'vent'}),
   ...tokens(['the impostor', 'an impostor', 'the imposter', 'an imposter'], {t: 'imp', v: true}),
   ...tokens(['my partner', 'team mate', 'my teammate'], {t: 'kw', k: 'partner'}),
@@ -1575,7 +1813,12 @@ const SAY_WORDS = [
   ...tokens(['killed', 'kill', 'kills', 'killing', 'murdered', 'murder', 'stabbed', 'stab', 'shot', 'snapped', 'slashed'], {t: 'kw', k: 'kill'}),
   ...tokens(['dead', 'died', 'dies', 'body', 'bodies', 'corpse', 'deceased'], {t: 'kw', k: 'dead'}),
   ...tokens(['vent', 'vented', 'venting', 'vents'], {t: 'kw', k: 'vent'}),
-  ...tokens(['scan', 'scanned', 'scanning', 'visual', 'asteroids', 'garbage', 'trash', 'chute'], {t: 'kw', k: 'visual'}),
+  ...tokens(['scan', 'scanning'], {t: 'kw', k: 'visual', task: ['Submit Scan']}),
+  ...tokens(['scanned'], {t: 'kw', k: 'visual', task: ['Submit Scan'], past: true}),
+  ...tokens(['asteroids'], {t: 'kw', k: 'visual', task: ['Clear Asteroids']}),
+  ...tokens(['garbage', 'trash'], {t: 'kw', k: 'visual', task: ['Empty Garbage', 'Empty Chute']}),
+  ...tokens(['chute'], {t: 'kw', k: 'visual', task: ['Empty Chute', 'Empty Garbage']}),
+  ...tokens(['visual'], {t: 'kw', k: 'visual'}),
   ...tokens(['sus', 'suss', 'sussy', 'suspicious', 'suspect', 'sketchy', 'shady', 'fishy', 'faking', 'faker', 'fake', 'faked',
     'lying', 'liar', 'lied'], {t: 'kw', k: 'sus'}),
   ...tokens(['safe', 'clear', 'cleared', 'clean', 'confirmed', 'innocent', 'trusted', 'trust', 'legit', 'crew', 'crewmate',
@@ -1586,7 +1829,9 @@ const SAY_WORDS = [
   ...tokens(['not', 'isnt', 'wasnt', 'aint', 'never', 'nope'], {t: 'not'}),
   ...tokens(['by'], {t: 'by'}),
   ...tokens(['im'], {t: 'self'}),
-  ...tokens(['done', 'finished'], {t: 'done'}),
+  ...tokens(['done', 'finished', 'completed', 'complete'], {t: 'done'}),
+  ...tokens(['did'], {t: 'done', weak: true}),               /* "did" only counts with a task: "did wires" */
+  ...tokens(['started'], {t: 'done', weak: true, first: true}),  /* "started sample" is the first step */
   ...tokens(STOP, {t: 'stop'})
 ];
 
@@ -1623,11 +1868,30 @@ function voiceLexicon(ctx) {
     for (const a of (ROOM_SAYS[r] || [])) add(a, tok, true);
     for (const a of ((ROOM_SAYS_MAP[ctx.map] || {})[r] || [])) add(a, tok, true);
   }
-  for (const [p, tok] of SAY_PHRASES) add(p, tok, false);
+  /* the first of these tasks that's on this map, as {n, i, vis} */
+  const onMap = list => {
+    for (const x of list) {
+      const want = typeof x === 'string' ? {n: x} : x;
+      const t = (m.tasks || []).find(t => t.n === want.n);
+      if (t) return {n: t.n, i: want.i === 'last' ? t.st.length - 1 : (want.i ?? null), vis: t.st.some(s => s.vis)};
+    }
+    return null;
+  };
+  /* this map's tasks: full names, then what people call them */
+  for (const t of m.tasks || []) add(t.n, {t: 'task', ...onMap([t.n])}, false);
+  for (const [words, list] of TASK_SAYS) {
+    const hit = onMap(list);
+    if (hit) for (const w of words) add(w, {t: 'task', ...hit, past: PAST.test(w)}, false);
+  }
+  /* visual-task words carry their task, for "did scan" said about yourself */
+  const withTask = tok => tok.task ? {...tok, task: onMap(tok.task)} : tok;
+  for (const [p, tok] of SAY_PHRASES) add(p, withTask(tok), false);
   /* only a color's real name forgives typos; the misspellings above must match exactly */
   for (const c of COLORS) for (const a of COLOR_SAYS[c.id]) add(a, {t: 'color', c: c.id}, a === c.id);
   for (const [id, name] of Object.entries(ctx.names || {})) if (COLOR[id]) add(name, {t: 'color', c: id}, true);
-  for (const [w, tok] of SAY_WORDS) add(w, tok, false);
+  for (const [w, tok] of SAY_WORDS) add(w, withTask(tok), false);
+  /* tasks from the other maps, so "did reboot wifi" on The Skeld can say the map looks wrong */
+  for (const [k, other] of Object.entries(MAPS)) if (k !== ctx.map) for (const t of other.tasks || []) add(t.n, {t: 'task', n: t.n, off: true}, false);
   return {lex, fuzzy};
 }
 
@@ -1711,6 +1975,10 @@ function parseCommand(text, ctx) {
   let m = /^\s*(?:add (?:a )?note|notes?|remember)\b[\s,:.\-]*(.+)$/i.exec(raw);
   if (m && normSpeech(m[1])) return {ok: true, actions: [{type: 'note', text: tidyText(m[1])}], warn: []};
 
+  /* "what did I do", "my tasks", "what's left" ("what's" arrives as "what") */
+  if (/^(?:what|which) (?:tasks? )?(?:did|have|has) i (?:do|done|did|finish|finished|complete|completed|fake|faked)\b|^(?:show |list |read )?(?:me )?(?:my )?tasks?(?: list| done| left| so far)?$|^(?:what|whats|what is) (?:left|done)$/.test(clean))
+    return {ok: true, actions: [{type: 'tasklist'}], warn: []};
+
   /* "red says ..." is a claim, so a room inside it isn't a sighting */
   m = /^(.+?)\s+(?:says|said|claims|claimed|is saying|was saying|thinks)\b[\s,:.\-]*(.+)$/i.exec(raw);
   if (m) {
@@ -1718,17 +1986,21 @@ function parseCommand(text, ctx) {
     if (who.length === 1 && normSpeech(m[2])) return {ok: true, actions: [{type: 'claim', speaker: who[0], text: tidyText(m[2])}], warn: []};
   }
 
+  const mp = MAPS[ctx.map] || MAPS.skeld;
   const toks = tokenizeSpeech(clean.split(' '), voiceLexicon(ctx), ctx);
 
   /* Walk the tokens and cut them into clauses, one per thing you saw:
      "black in admin red sus" -> [black, Admin] [red, sus].
-     A new color starts a new clause once the current one is complete. */
-  const fresh = () => ({colors: [], before: [], room: null, kind: null, imp: null, neg: false, passive: false, self: false});
+     A new color starts a new clause once the current one is complete.
+     A clause with tasks and no player in it is yours: "did wires in admin". */
+  const fresh = () => ({colors: [], before: [], room: null, kind: null, imp: null, neg: false, passive: false, self: false,
+    tasks: [], ptask: null, vtask: null, past: false});
   const anyone = x => x.colors.length + x.before.length > 0 || x.self;
-  const complete = x => anyone(x) && !!(x.room || x.kind || x.imp != null);
+  const someone = x => x.colors.length + x.before.length > 0;       /* another player, not you */
+  const complete = x => x.tasks.length > 0 || (anyone(x) && !!(x.room || x.kind || x.imp != null || x.ptask));
   const groups = [], reporters = [], flags = {};
   let g = fresh();
-  const close = () => { if (anyone(g) || g.room) groups.push(g); g = fresh(); };
+  const close = () => { if (anyone(g) || g.room || g.tasks.length || g.vtask) groups.push(g); g = fresh(); };
 
   for (const tok of toks) {
     switch (tok.t) {
@@ -1742,10 +2014,27 @@ function parseCommand(text, ctx) {
         g.self = true;
         break;
       case 'room':
+        /* right after one of your tasks it's where you did it: "did wires in admin and electrical" */
+        if (g.tasks.length && !someone(g)) {
+          const last = g.tasks[g.tasks.length - 1];
+          if (!last.room) last.room = tok.r; else g.tasks.push({...last, room: tok.r});
+          break;
+        }
         if (g.room && anyone(g)) close();
         g.room = tok.r;
         break;
+      case 'task':
+        if (tok.off) { flags.off = flags.off || tok.n; break; }   /* a task from another map */
+        if (someone(g)) { g.ptask = tok; break; }                /* "red did wires": what red was doing */
+        if (complete(g) && !g.tasks.length) close();
+        g.tasks.push({n: tok.n, i: tok.i, room: null, past: !!tok.past});
+        break;
       case 'kw': {
+        if (!someone(g)) {
+          if (tok.task) { g.vtask = tok.task; if (tok.past) g.past = true; }                 /* "did scan" about yourself */
+          if (tok.k === 'sus' && /^fak/.test(tok.raw)) { flags.trig = true; break; }         /* impostor: "faked swipe card" */
+          if (tok.k === 'safe' && /^crew/.test(tok.raw)) flags.role = 'crew';               /* "new game, I'm crew" */
+        }
         let k = tok.k;
         if (g.neg) {
           g.neg = false;
@@ -1767,6 +2056,7 @@ function parseCommand(text, ctx) {
         let v = tok.v;
         if (g.neg) { g.neg = false; v = !v; }
         g.imp = v;
+        if (!someone(g)) flags.role = v ? 'imp' : 'crew';        /* "new game, I'm impostor" */
         break;
       }
       case 'not': g.neg = true; break;
@@ -1778,38 +2068,61 @@ function parseCommand(text, ctx) {
         break;
       case 'endmeet': flags.endmeet = true; break;
       case 'undo': flags.undo = true; break;
-      case 'done': flags.done = true; break;
+      case 'done':
+        flags.trig = true;                       /* "did", "done", "finished": a task you name is checked off */
+        if (!tok.weak) flags.done = true;        /* "done" on its own also means the impostor's next stop */
+        if (tok.first) flags.first = true;       /* "started" */
+        if (tok.me && anyone(g)) close();        /* "red in admin, I did wires": the wires are yours */
+        break;
+      case 'newgame': flags.newgame = true; break;
     }
   }
   close();
 
   /* clauses -> actions */
-  const actions = [], warn = [];
-  let prev = null;
+  const actions = [], warn = [], unsaid = [];
+  let prev = null, selfRoom = null;
   for (const x of groups) {
     let kind = x.kind || (x.imp === true ? 'sus' : x.imp === false ? 'safe' : null);
     const people = [...x.before, ...x.colors];
     let room = x.room;
+    /* your own tasks. They need "did", "done" or a past tense, so "I still need wires" checks nothing off */
+    if (!people.length && (x.tasks.length || x.vtask)) {
+      const list = x.tasks.length ? x.tasks : [{n: x.vtask.n, i: x.vtask.i, room: null, past: x.past}];
+      for (const k of list) {
+        if (flags.trig || k.past) actions.push({type: 'task', n: k.n, i: k.i, room: k.room || room || selfRoom, first: !!flags.first});
+        else unsaid.push(k.n);
+      }
+      continue;
+    }
     if (x.self) {
       if (room) {
+        selfRoom = room;                       /* "I'm in admin, did swipe card" */
         actions.push({type: 'self', room});
         if (x.colors.length) actions.push({type: 'seen', who: x.colors, room});
       }
       continue;
     }
     if (!people.length) {
+      const n = flags.trig ? taskInRoom(mp, room) : null;
+      if (n) actions.push({type: 'task', n, i: null, room, first: !!flags.first});     /* "did reactor" */
+      else if (flags.trig && !(prev && prev.kind === 'seen')) warn.push(`Which task did you do in ${room}?`);
       /* a room on its own after a sighting: "black in admin, then med bay" */
-      if (prev && prev.kind === 'seen') actions.push({type: 'seen', who: prev.who, room});
+      else if (prev && prev.kind === 'seen') actions.push({type: 'seen', who: prev.who, room});
       else warn.push(`Who was in ${room}?`);
       continue;
     }
+    /* a task someone else did: a visual one clears them, any other says what they were doing */
+    const did = x.ptask;
+    if (did && did.vis && !kind) kind = 'visual';
     if (!kind && !room) {
+      if (did) { actions.push({type: 'pdid', who: people, n: did.n}); prev = null; continue; }
       /* "red too" borrows the room or mark from the clause before */
       if (prev && INHERIT.has(prev.kind)) { kind = prev.kind === 'seen' ? null : prev.kind; room = prev.room; }
       else { warn.push(`Where was ${andList(people.map(nm))}?`); continue; }
     }
     switch (kind) {
-      case null: actions.push({type: 'seen', who: people, room}); break;
+      case null: actions.push({type: 'seen', who: people, room, task: did ? did.n : null}); break;
       case 'sus': case 'safe': case 'unknown': actions.push({type: 'status', who: people, s: kind, room}); break;
       case 'dead': actions.push({type: 'dead', who: people, room}); break;
       case 'kill': {
@@ -1829,11 +2142,21 @@ function parseCommand(text, ctx) {
 
   if (flags.endmeet) actions.unshift({type: 'endmeet'});
   if (flags.meet) actions.push({type: 'meet', reporters});
-  if (flags.done && !groups.some(x => x.colors.length || x.before.length)) actions.push({type: 'done'});
+  /* "done" alone fakes the impostor's next stop; with a task named, it's that task */
+  if (flags.done && !actions.some(a => a.type === 'task') && !groups.some(x => x.colors.length || x.before.length)) actions.push({type: 'done'});
+  if (flags.newgame) {
+    /* the new game replaces the old one, so meeting words in the same breath don't apply */
+    for (let k = actions.length - 1; k >= 0; k--) if (['endmeet', 'meet', 'done'].includes(actions[k].type)) actions.splice(k, 1);
+    actions.unshift({type: 'newgame', mode: flags.role || null});
+  }
   if (flags.undo) actions.unshift({type: 'undo'});          /* "undo, black in med bay" fixes the last one */
+  if (flags.off) warn.push(`${flags.off} isn't a task on ${mp.name}. Is the map right? It's in Setup`);
   if (!actions.length) {
+    if (flags.off) return {ok: false, partial: true, error: warn[warn.length - 1] + '.'};
+    if (unsaid.length) return {ok: false, partial: true, error: `Say "did ${unsaid[0]}" to check it off.`};
     if (warn.length) return {ok: false, partial: true, error: warn[0]};
-    return {ok: false, error: `Didn't catch a player or a room in "${raw}".`};
+    if (flags.trig) return {ok: false, partial: true, error: 'Which task? Say something like "did swipe card".'};
+    return {ok: false, error: `Didn't catch a player, room or task in "${raw}".`};
   }
   return {ok: true, actions, warn};
 }
@@ -1856,10 +2179,17 @@ function endMeeting() {
   addLog('round', {text: 'Back to tasks'});
   state.tab = 'players';
 }
+/* a fresh game with the same lobby, names and settings (a clean one after the example) */
+function startNewGame(mode) {
+  state = newGame(state.example ? {mode: state.mode, map: state.map, imps: state.imps, settings: state.settings} : state);
+  if (mode) state.mode = mode;
+  state.tab = state.mode === 'imp' ? 'tasks' : 'players';     /* impostors start by adding their fake tasks */
+  lastFake = null; claimWho = null;
+}
 
 /* carry out a plan from parseCommand. Returns what happened, in words. */
 function applyPlan(actions) {
-  const said = [], warn = [], joined = [];
+  const said = [], warn = [], joined = [], info = [];      /* info: answers that change nothing ("what did I do") */
   const alive = id => !['dead', 'ejected'].includes(P(id).s);
   const inRoom = r => r ? ` in ${r}` : '';
   /* a color you haven't added to the lobby yet gets added */
@@ -1884,7 +2214,7 @@ function applyPlan(actions) {
     if (room) { p.body = room; addLog('body', {who: id, room}); }
     else addLog('status', {who: id, text: statusLabel('dead')});
   };
-  const sight = (id, room) => {
+  const sight = (id, room, task) => {
     const p = P(id);
     if (p.s === 'ejected') { warn.push(`${nameOf(id)} was ejected`); return false; }
     if (p.s === 'dead') {
@@ -1892,7 +2222,8 @@ function applyPlan(actions) {
       else warn.push(`${nameOf(id)} is already dead`);
       return false;
     }
-    addLog('seen', {who: id, room});
+    if (task) addLog('saw', {who: id, room, text: `doing ${task} in ${room}`});      /* "red did wires in electrical" */
+    else addLog('seen', {who: id, room});
     return true;
   };
 
@@ -1900,10 +2231,27 @@ function applyPlan(actions) {
     const ids = (a.who || []).filter(join);
     switch (a.type) {
       case 'seen': {
-        const ok = ids.filter(id => sight(id, a.room));
-        if (ok.length) said.push(`${andNames(ok)} seen in ${a.room}`);
+        const ok = ids.filter(id => sight(id, a.room, a.task));
+        if (ok.length) said.push(`${andNames(ok)} seen in ${a.room}${a.task ? ` doing ${a.task}` : ''}`);
         break;
       }
+      case 'pdid':
+        for (const id of ids) addLog('saw', {who: id, text: `did ${a.n}`});
+        if (ids.length) said.push(`${andNames(ids)} did ${a.n}`);
+        break;
+      case 'task': {
+        const t = taskByName(a.n);
+        if (!t) { warn.push(`${a.n} isn't a task on ${map().name}`); break; }
+        const r = doTask(t, a);
+        if (r.msg) said.push(r.msg);
+        if (r.warn) warn.push(r.warn);
+        break;
+      }
+      case 'tasklist': info.push(taskSummary()); break;
+      case 'newgame':
+        startNewGame(a.mode);
+        said.push(`New game${a.mode ? `. You're ${a.mode === 'imp' ? 'an impostor' : 'crew'}` : ''}`);
+        break;
       case 'status': {
         const ok = [];
         for (const id of ids) {
@@ -1986,7 +2334,7 @@ function applyPlan(actions) {
         break;
       }
       case 'done': {
-        if (state.mode !== 'imp') { warn.push('"Done" finishes your next stop on the impostor route'); break; }
+        if (state.mode !== 'imp') { warn.push('Say which task you did, like "did swipe card"'); break; }
         const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
         if (!stops.length) { warn.push('No fake tasks left on your route'); break; }
         const first = stops[0].steps[0];
@@ -1998,7 +2346,7 @@ function applyPlan(actions) {
     }
   }
   if (joined.length) said.push(`added ${andList(joined)} to the lobby`);
-  return {said, warn};
+  return {said, warn, info};
 }
 
 /* Undo puts back the whole game as it was before the last voice command,
@@ -2029,14 +2377,16 @@ function runVoice(text) {
     if (!acts.length) return plan;
   }
   const before = JSON.stringify(state);
-  const {said, warn} = applyPlan(acts);
+  const {said, warn, info} = applyPlan(acts);
   commit();
   const extra = [...warn, ...(plan.warn || [])];
-  plan.logged = said.length > 0;
+  plan.logged = said.length > 0 || info.length > 0;
   if (said.length) {
     voiceSnap = {before, after: coreJSON()};
-    showVoiceResult('ok', [...said, ...extra].map(capFirst).join('. '), true);
+    showVoiceResult('ok', [...said, ...info, ...extra].map(capFirst).join('. '), true);
     try { navigator.vibrate && navigator.vibrate(40); } catch (e) { /* no vibration here */ }
+  } else if (info.length) {
+    showVoiceResult('info', [...info, ...extra].map(capFirst).join('. '));     /* nothing changed, so nothing to undo */
   } else {
     showVoiceResult('err', extra.map(capFirst).join('. ') || "Didn't log anything");
   }
@@ -2049,7 +2399,7 @@ function showVoiceResult(kind, msg, undo) {
   el.innerHTML = `<span class="vr-msg">${esc(msg)}</span>${undo ? '<button type="button" class="linkbtn" data-action="voiceUndo">Undo</button>' : ''}`;
   el.hidden = false;
   clearTimeout(showVoiceResult.h);
-  if (kind !== 'listen') showVoiceResult.h = setTimeout(() => { el.hidden = true; }, kind === 'ok' ? 12000 : 9000);
+  if (kind !== 'listen') showVoiceResult.h = setTimeout(() => { el.hidden = true; }, kind === 'ok' || kind === 'info' ? 12000 : 9000);
 }
 
 /* Typing or keyboard dictation. With auto-log on, a complete command logs
@@ -2085,6 +2435,20 @@ function submitVoice() {
 
 /* the "?" sheet: everything you can say, plus this map's rooms */
 let helpOpen = false;
+/* the short name the help sheet shows for a task: the words people really use, else the shortest one */
+const HELP_TASK_SAY = {'Submit Scan': 'scan', 'Clear Asteroids': 'asteroids', 'Empty Garbage': 'trash', 'Empty Chute': 'chute',
+  'Fix Wiring': 'wires', 'Start Reactor': 'reactor', 'Prime Shields': 'shields', 'Clean O2 Filter': 'filter',
+  'Upload Data': 'download, upload', 'Divert Power': 'divert, accept', 'Swipe Card': 'card', 'Fuel Engines': 'fuel'};
+function taskSay(n) {
+  if (HELP_TASK_SAY[n]) return HELP_TASK_SAY[n];
+  let best = null;
+  for (const [words, list] of TASK_SAYS) {
+    const first = list.map(x => typeof x === 'string' ? x : x.n).find(x => taskByName(x));
+    if (first !== n) continue;
+    for (const w of words) if (!PAST.test(w) && w.length < n.length - 2 && (!best || w.length < best.length)) best = w;
+  }
+  return best;
+}
 function shortSay(r) {
   const all = [...(ROOM_SAYS[r] || []), ...(((ROOM_SAYS_MAP[state.map] || {})[r]) || [])];
   return all.find(a => a.length <= r.length - 3) || null;
@@ -2097,7 +2461,10 @@ function renderHelp() {
     ['Bodies and kills', ['black dead in electrical', 'red killed black in electrical', 'red vented in nav']],
     ['Marks', ['red sus', "blue's not sus", 'purple did scan', 'white ejected, not the impostor']],
     ['Meetings', ['meeting', 'blue reported black dead in storage', 'red says they were in nav', 'back to tasks']],
-    ['Impostor games', ["I'm in electrical", 'done', 'red partner']],
+    ['Your tasks', ['did swipe card', 'did wires in electrical',
+      ...(taskByName('Upload Data') && m.upload && !m.upload.includes(',') ? [`uploaded in ${m.upload.toLowerCase()}`] : []), 'what did I do']],
+    ['Impostor games', ["I'm in electrical", 'done', 'faked swipe card', 'red partner']],
+    ['New game', ['new game', "new game, I'm impostor"]],
     ['Mistakes and notes', ['undo', 'undo, black in med bay', 'note yellow followed me']]
   ];
   let elsewhere = false;   /* is there a hands-free copy on another site? */
@@ -2117,7 +2484,8 @@ function renderHelp() {
       <button type="button" data-action="setSetting" data-v="voiceAuto:1" aria-pressed="${voiceAuto()}">On</button>
       <button type="button" data-action="setSetting" data-v="voiceAuto:0" aria-pressed="${!voiceAuto()}">Off</button></div></div>
     <div class="sec"><h3>Things you can say</h3><dl class="says">${groups.map(([h, list]) => `<div><dt>${esc(h)}</dt><dd>${say(list)}</dd></div>`).join('')}</dl>
-      <p class="hint" style="margin-top:8px">"Done" fakes the next stop on your route. Player names from Setup work as well as colors.</p></div>
+      <p class="hint" style="margin-top:8px">A task needs "did", "done" or "finished" with it, so just talking about one doesn't check it off. "Done" on its own fakes your next stop as an impostor. Player names from Setup work as well as colors.</p></div>
+    <div class="sec"><h3>Tasks on ${esc(m.name)}</h3><p class="hint">${esc((m.tasks || []).map(t => { const s = taskSay(t.n); return s ? `${t.n} (${s})` : t.n; }).join(', '))}</p></div>
     <div class="sec"><h3>Rooms on ${esc(m.name)}</h3><p class="hint">${esc(m.rooms.map(r => { const s = shortSay(r); return s ? `${r} (${s})` : r; }).join(', '))}</p></div>
     <p class="hint">In a Discord call? Mute yourself or use push-to-talk first, or the whole lobby hears what you log.</p>
   </div>`;
@@ -2354,7 +2722,7 @@ const actions = {
     commit();
   },
   setImps(v) { state.imps = Number(v); state.impOverride = null; commit(); },
-  setMap(v) { if (state.map === v) return; state.map = v; state.fakes = {}; state.routeFrom = null; lastFake = null; watchSel = null; commit(); toast(`Map: ${MAPS[v].name}`); },
+  setMap(v) { if (state.map === v) return; state.map = v; state.fakes = {}; state.mine = {}; state.routeFrom = null; lastFake = null; watchSel = null; commit(); toast(`Map: ${MAPS[v].name}`); },
   toggleColor(id) {
     const i = state.lobby.indexOf(id);
     if (i >= 0) {
@@ -2370,8 +2738,18 @@ const actions = {
   setMe(id) { state.me = id; commit(); },
   newGame() {
     if (!arm('newGame')) return;
-    state = newGame(state); state.tab = 'players';
+    startNewGame();
     commit(); toast('New game started');
+  },
+  mineDone(n) {
+    const t = taskByName(n); if (!t) return;
+    const r = doTask(t, {i: null, room: null});
+    commit(); toast(r.msg || r.warn);
+  },
+  mineClear(n) {
+    delete state.mine[n];
+    state.log = state.log.filter(e => !(e.k === 'task' && e.n === n));      /* so your story doesn't claim it */
+    commit(); toast(`${n} unchecked`);
   },
   resetAll() {
     if (!arm('resetAll')) return;
@@ -2591,10 +2969,12 @@ function start(data) {
   state = (data && data.state) || load() || exampleGame();
   if (!MAPS[state.map]) state.map = 'skeld';
   state.awake = false;
-  /* games saved by an older version: give each fake task the newer fields */
-  for (const [n, f] of Object.entries(state.fakes || {})) {
+  /* games saved by an older version: give each task list the newer fields */
+  state.fakes = state.fakes || {};
+  state.mine = state.mine || {};
+  for (const book of [state.fakes, state.mine]) for (const [n, f] of Object.entries(book)) {
     const t = (MAPS[state.map].tasks || []).find(x => x.n === n);
-    if (!t) { delete state.fakes[n]; continue; }
+    if (!t) { delete book[n]; continue; }
     f.done = t.st.map((_, i) => !!(f.done && f.done[i]));
     f.room = t.st.map((_, i) => (f.room && f.room[i] != null) ? f.room[i] : null);
   }
