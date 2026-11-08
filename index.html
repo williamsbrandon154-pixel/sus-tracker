@@ -720,7 +720,7 @@ const nameOf = id => state.names[id] ? state.names[id] : (COLOR[id] ? COLOR[id].
 const fullName = id => state.names[id] ? `${state.names[id]} (${COLOR[id].name})` : COLOR[id].name;
 const map = () => MAPS[state.map];
 const isGone = id => ['dead','ejected'].includes(P(id).s);
-const fmtClock = t => new Date(t).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+const fmtClock = t => new Date(t).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', second: '2-digit'});
 function fmtAgo(t) {
   const m = Math.floor((Date.now() - t) / 60000);
   if (m < 1) return 'just now';
