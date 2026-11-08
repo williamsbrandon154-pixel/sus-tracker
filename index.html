@@ -266,6 +266,28 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin-bottom:5px;font
 .trow .t-side{grid-row:1 / span 2;grid-column:2;display:grid;gap:6px;justify-items:end;text-align:right}
 .trow .t-time{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
 
+/* ---------- task board: your whole list on one screen ---------- */
+.board .card-head{margin-bottom:8px}
+.b-next{display:flex;align-items:center;justify-content:space-between;gap:8px 10px;flex-wrap:wrap;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--panel));border-radius:12px;padding:8px 10px;margin-bottom:8px}
+.b-next.done{display:block;font-size:14px}
+.b-next-txt{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;min-width:0}
+.b-next-txt b{font-family:var(--font-display);font-size:19px;line-height:1.15}
+.b-what{font-size:13px;color:var(--ink-2);flex-basis:100%}
+.b-next-btns{display:flex;gap:6px}
+.b-list{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.b-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;padding:4px 4px 4px 6px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);min-width:0}
+.b-tick{width:28px;height:28px;border-radius:50%;border:2px solid var(--muted);background:var(--panel);display:grid;place-items:center;font-weight:800;font-size:14px;line-height:1;padding:0;color:var(--accent)}
+.b-tick.part{border-color:var(--accent);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 60%,var(--panel)) 50%,var(--panel) 50%)}
+.b-tick.all{background:var(--ok);border-color:var(--ok);color:var(--on-accent)}
+.b-main{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;min-width:0}
+.b-name{font-weight:700;font-size:14px;line-height:1.3}
+.b-row.is-done .b-name{text-decoration:line-through;text-decoration-color:var(--muted);color:var(--ink-2)}
+.b-prog{font-family:var(--font-mono);font-size:12px;color:var(--accent)}
+.b-rooms{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:0 4px;align-items:baseline}
+.b-rooms .b-done{text-decoration:line-through;opacity:.65}
+.b-rooms .arrow{font-size:12px}
+.b-x{border:0;background:transparent;color:var(--muted);font-size:18px;width:30px;height:30px;border-radius:8px;padding:0}
+
 /* ---------- impostor route ---------- */
 .from-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .from-row .lbl{margin:0;white-space:nowrap}
@@ -1229,7 +1251,8 @@ function viewTasks() {
     .map(([k, label]) => `<div class="tgroup"><h3>${label} · ${byType[k].length}</h3><ul class="tlist">${rows(byType[k])}</ul></div>`).join('');
 
   return `${exampleBanner()}
-    ${crewSide ? mineCard() + watchCard : fakeCard}
+    ${taskBoard()}
+    ${crewSide ? watchCard : fakeCard}
     <section class="card"><div class="card-head"><h2>${esc(m.name)}</h2><span class="sub">Cheat sheet · match these to your lobby</span></div>${toggles}<dl class="facts">${facts}</dl></section>
     <section class="card">
       <div class="card-head"><h2>All tasks</h2><span class="sub">* = rough time</span></div>
@@ -1258,9 +1281,8 @@ let lastFake = null;
 function routeCard() {
   const m = map(), now = Date.now();
   const names = Object.keys(state.fakes).filter(n => taskByName(n));
-  const head = '<div class="card-head"><h2>My route</h2><span class="sub">Walk it like a real crewmate would</span></div>';
-  if (!names.length) return `<section class="card">${head}
-    <p class="empty">Read your fake list off the screen: "my tasks are admin swipe card, cafeteria download, electrical wires". Or tap Add below on each task. Then this card shows where to go next, where the second half of each task happens, and when to come back to tasks that make you wait. Say "done" at each stop.</p></section>`;
+  const head = '<div class="card-head"><h2>Route details</h2><span class="sub">Walk it like a real crewmate would</span></div>';
+  if (!names.length) return '';                     /* the task board above explains what to say */
   const from = routeStart();
   const fromOpts = [...new Set([...(m.spawnChoices || []), ...m.rooms])];
   const fromSel = `<div class="from-row"><label class="lbl" for="route-from">I'm in</label>
@@ -1272,10 +1294,7 @@ function routeCard() {
   }).join('')}</ul>` : '';
   const undo = lastFake ? '<button type="button" class="linkbtn" data-action="routeUndo">Undo last step</button>' : '';
   const stops = toStops(planRoute(m, state.fakes, from, now));
-  if (!stops.length) return `<section class="card">${head}${fromSel}
-    <div class="nextstop done"><p class="eyebrow">All faked</p><h3 class="next-room">You're done</h3>
-      <p class="hint">Every task on your list is faked. Keep moving between rooms and stay near people so you have an alibi.</p></div>
-    ${undo}${fakeListBlock()}</section>`;
+  if (!stops.length) return undo ? `<section class="card">${head}${undo}</section>` : '';
   const next = stops[0], first = next.steps[0];
   const path = [from, ...stops.map(s => s.room)].filter((r, k, a) => k === 0 || r !== a[k - 1]);
   return `<section class="card">${head}${fromSel}
@@ -1297,21 +1316,8 @@ function routeCard() {
     <div class="path">${path.map((r, k) => `<span class="pathstop ${k === 0 ? 'here' : ''}">${esc(r)}</span>`).join('<span class="arrow" aria-hidden="true">→</span>')}</div>
     ${stops.length > 1 ? `<ol class="stops">${stops.slice(1).map(s => `<li><b>${esc(s.room)}</b><span>${esc(s.steps.map(x => x.t.n + (x.t.st[x.i].d ? ` (${x.t.st[x.i].d})` : '')).join(', '))}${s.steps[0].wait > 0.5 ? ' · after the wait' : ''}</span></li>`).join('')}</ol>` : ''}
     ${undo}
-    ${fakeListBlock()}
   </section>`;
 }
-function fakeListBlock() {
-  const names = Object.keys(state.fakes).filter(n => taskByName(n));
-  return `<p class="eyebrow" style="margin:16px 0 6px">Your fake list</p>
-    <ul class="tlist">${names.map(n => {
-      const t = taskByName(n), f = state.fakes[n];
-      const done = f.done.filter(Boolean).length;
-      return `<li class="trow"><div class="t-name">${esc(n)} <span class="tag ${done === t.st.length ? 'st-safe' : ''}">${done}/${t.st.length}</span></div>
-        <div class="t-chain">${esc(t.st.map((x, i) => stageLabel(t, i, resolvedKey(t, f, i))).join(' → '))}</div>
-        <div class="t-side"><button type="button" class="btn ghost sm" data-action="removeFake" data-v="${esc(n)}">Remove</button></div></li>`;
-    }).join('')}</ul>`;
-}
-
 /* ---- Room picker, for tasks whose room comes from your list ---- */
 let picking = null;
 function renderPicker() {
@@ -1338,7 +1344,7 @@ function splitStep(v) {
 function completeStep(t, i, key, quiet) {
   const f = state.fakes[t.n]; if (!f) return;
   const st = t.st[i];
-  const entry = {id: uid(), t: Date.now(), ph: phaseKey(), k: 'fake', text: `${t.n}: ${stageLabel(t, i, key)}`};
+  const entry = {id: uid(), t: Date.now(), ph: phaseKey(), k: 'fake', n: t.n, text: `${t.n}: ${stageLabel(t, i, key)}`};
   lastFake = {n: t.n, i, prevFrom: state.routeFrom, prevReady: f.readyAt, prevRoom: f.room[i], logId: entry.id};
   f.done[i] = true; f.room[i] = key; f.skip = 0;
   f.readyAt = st.wait ? Date.now() + st.wait * 1000 : null;
@@ -1498,26 +1504,83 @@ function taskSummary() {
   return out.join('. ');
 }
 
-/* ---- My tasks (crewmate) ---- */
-function mineCard() {
-  const names = Object.keys(state.mine).filter(n => taskByName(n));
-  const head = `<div class="card-head"><h2>My tasks</h2><span class="sub">${names.length ? `${doneCount()} of ${names.length} done` : 'Check off what you finish'}</span></div>`;
-  if (!names.length) return `<section class="card">${head}
-    <p class="empty">At the start, read your list off the screen: "my tasks are admin swipe card, cafeteria download, electrical wires". Then say "did download" when you finish one, and it already knows the room. You can also tap Done next to a task below. What you check off shows up in meetings, so you can say exactly where you were.</p></section>`;
-  return `<section class="card">${head}<ul class="tlist">${names.map(n => {
-    const t = taskByName(n), f = state.mine[n], k = f.done.filter(Boolean).length, all = k === t.st.length;
-    const chain = t.st.map((x, i) => `${f.done[i] ? '✓ ' : ''}${stageLabel(t, i, f.room[i])}`).join(' → ');
-    return `<li class="trow"><div class="t-name">${esc(n)} <span class="tag ${all ? 'st-safe' : ''}">${all ? 'Done' : `${k}/${t.st.length}`}</span></div>
-      <div class="t-chain">${esc(chain)}</div>
-      <div class="t-side">${all ? '' : `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(n)}">${t.st.some(s => s.wire) && k ? 'Next panel' : k ? 'Finish' : 'Done'}</button>`}
-        <button type="button" class="btn ghost sm" data-action="mineClear" data-v="${esc(n)}">Remove</button></div></li>`;
-  }).join('')}</ul></section>`;
+/* ---- Your list (crewmate tasks or impostor fakes) ---- */
+const myBook = () => state.mode === 'imp' ? state.fakes : state.mine;
+/* uncheck a task but keep it on your list; its log lines go, so your story doesn't claim it */
+function resetTask(n) {
+  const t = taskByName(n), f = myBook()[n];
+  if (!t || !f) return false;
+  f.done = t.st.map(() => false); f.readyAt = null;
+  state.log = state.log.filter(e => !((e.k === 'task' || e.k === 'fake') && e.n === n));
+  if (lastFake && lastFake.n === n) lastFake = null;
+  return true;
 }
-/* the Done button on each row of All tasks */
+/* take a task off your list completely */
+function dropTask(n) {
+  const book = myBook();
+  if (!book[n]) return false;
+  resetTask(n);
+  delete book[n];
+  return true;
+}
+/* the impostor's next stop, faked all at once: what "done" does */
+function fakeNextStop() {
+  const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+  if (!stops.length) return {warn: 'No fake tasks left on your route'};
+  const first = stops[0].steps[0];
+  if (first.wait > 0.5) return {warn: `${first.t.n} isn't ready yet. Come back in ${fmtLeft(first.wait * 1000)}`};
+  stops[0].steps.forEach(s => completeStep(s.t, s.i, s.key, true));
+  /* say where to walk next, so you never have to look */
+  const after = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+  const next = !after.length ? '. Every fake task is done' : after[0].steps[0].wait > 0.5
+    ? `. Nothing to fake for ${fmtLeft(after[0].steps[0].wait * 1000)}, then ${after[0].room}` : `. Next stop: ${after[0].room}`;
+  return {msg: `Faked ${andList([...new Set(stops[0].steps.map(s => s.t.n))])} in ${stops[0].room}${next}`};
+}
+
+/* ---- Task board: your whole list on one screen ----
+   One short row per task. Tap the circle to check it off (tap again to uncheck),
+   × takes it off your list. As an impostor the next stop sits on top. */
+function taskBoard() {
+  const imp = state.mode === 'imp', book = myBook();
+  const names = Object.keys(book).filter(n => taskByName(n));
+  const done = names.filter(n => book[n].done.every(Boolean)).length;
+  const head = `<div class="card-head"><h2>${imp ? 'Fake tasks' : 'My tasks'}</h2><span class="sub">${names.length ? `${done} of ${names.length} ${imp ? 'faked' : 'done'}` : 'Read them off your screen'}</span></div>`;
+  if (!names.length) return `<section class="card board">${head}
+    <p class="empty">Say your list once: "my tasks are admin swipe card, cafeteria download, electrical wires". ${imp ? 'It plans your fake route, and "done" walks it stop by stop.' : 'Then "did download" checks one off, room and all.'} Or tap ${imp ? 'Add' : 'Done'} on tasks below.</p></section>`;
+  /* rooms the route plans for steps your list didn't name, so wiring shows all three panels */
+  const now = Date.now(), plan = imp ? planRoute(map(), state.fakes, routeStart(), now) : [];
+  const planned = {};
+  plan.forEach(s => { planned[s.t.n + '|' + s.i] = s.key; });
+  let next = '';
+  if (imp) {
+    const stops = toStops(plan);
+    if (stops.length) {
+      const s = stops[0], first = s.steps[0];
+      const what = s.steps.map(x => x.t.st.length > 1 ? `${x.t.n} (${x.t.st[x.i].d || `${ORD[x.i]} ${x.t.st[x.i].wire ? 'panel' : 'step'}`})` : x.t.n).join(', ');
+      next = `<div class="b-next"><div class="b-next-txt"><span class="eyebrow">Next</span><b>${esc(s.room)}</b><span class="b-what">${esc(what)}</span>
+          ${first.wait > 0.5 ? `<span class="wait-note">Ready in <span data-ready="${now + Math.round(first.wait * 1000)}">${fmtLeft(first.wait * 1000)}</span></span>` : ''}</div>
+        <div class="b-next-btns"><button type="button" class="btn sm" data-action="routeFake" data-v="${esc(first.t.n)}|${first.i}|${esc(String(first.key))}">Fake it</button>
+          <button type="button" class="btn ghost sm" data-action="stopDone">Done</button></div></div>`;
+    } else next = '<div class="b-next done"><b>Every fake task is done.</b> Keep moving between rooms and stay near people.</div>';
+  }
+  const rows = names.map(n => {
+    const t = taskByName(n), f = book[n], k = f.done.filter(Boolean).length, all = k === t.st.length;
+    const rooms = t.st.map((x, i) => {
+      const key = f.room[i] != null ? f.room[i] : planned[n + '|' + i] != null ? planned[n + '|' + i] : resolvedKey(t, f, i);
+      return `<span class="${f.done[i] ? 'b-done' : ''}">${esc(stageRoom(t, i, key) || '?')}</span>`;
+    }).join('<span class="arrow" aria-hidden="true">→</span>');
+    return `<li class="b-row ${all ? 'is-done' : ''}">
+      <button type="button" class="b-tick ${all ? 'all' : k ? 'part' : ''}" data-action="${all ? 'taskReset' : 'taskTick'}" data-v="${esc(n)}" aria-label="${all ? 'Uncheck' : 'Check off'} ${esc(n)}">${all ? '✓' : ''}</button>
+      <div class="b-main"><span class="b-name">${esc(n)}</span>${t.st.length > 1 ? `<span class="b-prog">${k}/${t.st.length}</span>` : ''}<span class="b-rooms">${rooms}</span></div>
+      <button type="button" class="b-x" data-action="taskDrop" data-v="${esc(n)}" aria-label="Take ${esc(n)} off your list">×</button></li>`;
+  }).join('');
+  return `<section class="card board">${head}${next}<ul class="b-list">${rows}</ul></section>`;
+}
+/* the Done button on each row of All tasks (crewmate) */
 function mineBtn(t) {
   const f = state.mine[t.n], k = f ? f.done.filter(Boolean).length : 0;
-  if (f && k === t.st.length) return `<button type="button" class="btn ghost sm" data-action="mineClear" data-v="${esc(t.n)}" aria-pressed="true" aria-label="Uncheck ${esc(t.n)}">Done ✓</button>`;
-  return `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(t.n)}">${k ? `Done ${k}/${t.st.length}` : 'Done'}</button>`;
+  if (f && k === t.st.length) return `<button type="button" class="btn ghost sm" data-action="taskReset" data-v="${esc(t.n)}" aria-pressed="true" aria-label="Uncheck ${esc(t.n)}">Done ✓</button>`;
+  return `<button type="button" class="btn sm" data-action="taskTick" data-v="${esc(t.n)}">${k ? `Done ${k}/${t.st.length}` : 'Done'}</button>`;
 }
 
 /* ---- Log ---- */
@@ -2058,6 +2121,17 @@ function parseCommand(text, ctx) {
 
   const mp = MAPS[ctx.map] || MAPS.skeld;
   const L = voiceLexicon(ctx);
+
+  /* "add black", "remove color black": who's in the lobby. "remove swipe card" takes a task off your list */
+  const lob = /^(add|added|join|joined|remove|removed|delete|kick|kicked|drop|take out|take off)(?: the)?(?: colou?rs?| players?)?\s+(.+)$/.exec(clean);
+  if (lob) {
+    const drop = !/^(?:add|added|join|joined)$/.test(lob[1]);
+    const ts = tokenizeSpeech(lob[2].split(' '), L, ctx);
+    const who = [...new Set(ts.filter(t => t.t === 'color').map(t => t.c))];
+    if (who.length) return {ok: true, actions: [{type: 'lobby', add: drop ? [] : who, remove: drop ? who : []}], warn: []};
+    const gone = [...new Set(ts.filter(t => t.t === 'task' && !t.off).map(t => t.n))];
+    if (drop && gone.length) return {ok: true, actions: [{type: 'untask', names: gone}], warn: []};
+  }
   /* "my tasks are admin swipe card, cafeteria download": your list, read off the game's screen.
      The tasks go on your list (or your fake route) with their rooms, and nothing gets checked off. */
   const lm = /^(?:my (?:fake )?(?:tasks?|task list|list)(?: is| are)?|fake tasks?(?: are| is)?|tasks? (?:are|is)|task list(?: is)?|i (?:have|got|need to do)(?! (?:done|finished|completed|did)\b)|add(?: tasks?)?)\s+(.+)$/.exec(clean);
@@ -2357,6 +2431,26 @@ function applyPlan(actions) {
         break;
       }
       case 'tasklist': info.push(taskSummary()); break;
+      case 'lobby': {                    /* "add black", "remove color black" */
+        const added = [], removed = [];
+        for (const id of a.add) {
+          if (state.lobby.includes(id)) { warn.push(`${nameOf(id)} is already in the lobby`); continue; }
+          if (state.lobby.length >= 15) { warn.push('Lobbies max out at 15 players'); break; }
+          state.lobby.push(id); added.push(nameOf(id));
+        }
+        for (const id of a.remove) {
+          if (!state.lobby.includes(id)) { warn.push(`${nameOf(id)} isn't in the lobby`); continue; }
+          if (id === state.me) { warn.push(`${nameOf(id)} is you, so you stay in`); continue; }
+          if (state.lobby.length <= 4) { warn.push('A game needs at least 4 players'); break; }
+          state.lobby = state.lobby.filter(x => x !== id); removed.push(nameOf(id));
+        }
+        if (added.length) said.push(`Added ${andList(added)} to the lobby`);
+        if (removed.length) said.push(`Took ${andList(removed)} out of the lobby`);
+        break;
+      }
+      case 'untask':                     /* "remove swipe card" */
+        for (const n of a.names) { if (dropTask(n)) said.push(`Took ${n} off your list`); else warn.push(`${n} isn't on your list`); }
+        break;
       case 'tasks': {
         const r = addTasks(a.items);
         said.push(r.msg); warn.push(...r.warn);
@@ -2449,16 +2543,8 @@ function applyPlan(actions) {
       }
       case 'done': {
         if (state.mode !== 'imp') { warn.push('Say which task you did, like "did swipe card"'); break; }
-        const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
-        if (!stops.length) { warn.push('No fake tasks left on your route'); break; }
-        const first = stops[0].steps[0];
-        if (first.wait > 0.5) { warn.push(`${first.t.n} isn't ready yet. Come back in ${fmtLeft(first.wait * 1000)}`); break; }
-        stops[0].steps.forEach(s => completeStep(s.t, s.i, s.key, true));
-        /* say where to walk next, so you never have to look */
-        const after = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
-        const next = !after.length ? '. Every fake task is done' : after[0].steps[0].wait > 0.5
-          ? `. Nothing to fake for ${fmtLeft(after[0].steps[0].wait * 1000)}, then ${after[0].room}` : `. Next stop: ${after[0].room}`;
-        said.push(`Faked ${andList([...new Set(stops[0].steps.map(s => s.t.n))])} in ${stops[0].room}${next}`);
+        const r = fakeNextStop();
+        if (r.msg) said.push(r.msg); else warn.push(r.warn);
         break;
       }
     }
@@ -2582,6 +2668,7 @@ function renderHelp() {
     ['Your tasks', ['my tasks are admin swipe card, cafeteria download', 'did swipe card', 'did download', 'what did I do']],
     ['Impostor games', ['my tasks are ...', 'done', 'faked swipe card', "I'm in electrical", 'red partner']],
     ['New game', ['new game', "new game, I'm impostor"]],
+    ['Lobby', ['add black', 'remove color black', 'add cyan and lime', 'remove swipe card']],
     ['Mistakes and notes', ['undo', 'undo, black in med bay', 'note yellow followed me']]
   ];
   let elsewhere = false;   /* is there a hands-free copy on another site? */
@@ -2859,16 +2946,14 @@ const actions = {
     commit(); toast('New game started');
   },
   reloadPage() { location.reload(); },
-  mineDone(n) {
+  taskTick(n) {                       /* check off the next part of a task (all of it, unless it's wiring) */
     const t = taskByName(n); if (!t) return;
     const r = doTask(t, {i: null, room: null});
     commit(); toast(r.msg || r.warn);
   },
-  mineClear(n) {
-    delete state.mine[n];
-    state.log = state.log.filter(e => !(e.k === 'task' && e.n === n));      /* so your story doesn't claim it */
-    commit(); toast(`${n} unchecked`);
-  },
+  taskReset(n) { if (resetTask(n)) { commit(); toast(`${n} unchecked`); } },
+  taskDrop(n) { if (dropTask(n)) { commit(); toast(`Took ${n} off your list`); } },
+  stopDone() { const r = fakeNextStop(); commit(); toast(r.msg || r.warn); },
   resetAll() {
     if (!arm('resetAll')) return;
     state = newGame(); commit(); toast('Everything cleared');
@@ -3107,7 +3192,7 @@ function start(data) {
    writes the same stamp to version.json beside it on the site. Whenever you come back to the
    page (and every 5 minutes) it asks the site for version.json; a different stamp means a
    newer version is out, so the Update banner shows. Only on the site, not inside Claude. */
-const BUILD = '0eaa398c', BUILT = '2026-11-08T02:58:28Z';
+const BUILD = 'd004f068', BUILT = '2026-11-08T03:44:40Z';
 const onSite = () => { try { return !!HANDS_FREE_URL && location.hostname === new URL(HANDS_FREE_URL).hostname; } catch (e) { return false; } };
 const builtText = () => { const d = new Date(BUILT); return isNaN(d) ? '' : d.toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}); };
 async function checkUpdate() {
