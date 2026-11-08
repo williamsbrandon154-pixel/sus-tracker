@@ -88,6 +88,7 @@ p{margin:0}
 .vresult.ok .vr-msg::before{content:"\2713\00a0"}
 .vresult.err{color:var(--imp);border-color:color-mix(in srgb,var(--imp) 45%,transparent);background:color-mix(in srgb,var(--imp) 7%,var(--panel))}
 .vresult .linkbtn{padding:0;flex:none}
+.update{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;font-weight:700;padding:7px 10px;border-radius:10px;border:1px dashed color-mix(in srgb,var(--accent) 55%,var(--line));background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
 .sheet a{color:var(--accent);font-weight:700}
 .sheet .sec p + p{margin-top:6px}
 .says{display:grid;gap:12px;margin:0}
@@ -365,6 +366,7 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin-bottom:5px;font
         <button type="button" class="vb-btn vb-help" data-action="voiceHelp" aria-label="What you can say">?</button>
       </form>
       <div class="vresult" id="vresult" role="status" aria-live="polite" hidden></div>
+      <div class="update" id="update" role="status" hidden><span>A newer version of Sus Tracker is out.</span><button type="button" class="btn sm" data-action="reloadPage">Update</button></div>
     </div>
   </header>
   <main class="wrap" id="view" tabindex="-1"></main>
@@ -1258,7 +1260,7 @@ function routeCard() {
   const names = Object.keys(state.fakes).filter(n => taskByName(n));
   const head = '<div class="card-head"><h2>My route</h2><span class="sub">Walk it like a real crewmate would</span></div>';
   if (!names.length) return `<section class="card">${head}
-    <p class="empty">Tap Add below on each task from your in-game fake list. For tasks like Download Data it asks which room your list names. Then this card shows where to go next, where the second half of each task happens, and when to come back to tasks that make you wait.</p></section>`;
+    <p class="empty">Read your fake list off the screen: "my tasks are admin swipe card, cafeteria download, electrical wires". Or tap Add below on each task. Then this card shows where to go next, where the second half of each task happens, and when to come back to tasks that make you wait. Say "done" at each stop.</p></section>`;
   const from = routeStart();
   const fromOpts = [...new Set([...(m.spawnChoices || []), ...m.rooms])];
   const fromSel = `<div class="from-row"><label class="lbl" for="route-from">I'm in</label>
@@ -1366,18 +1368,22 @@ const stepName = (t, i) => t.st.length === 1 ? t.n : `${t.n} (${t.st[i].d || `${
    those, wiring goes one panel at a time and any other task counts as
    finished. The steps before the one you did had to happen first, so they
    get checked too. */
+/* The key for step i of task t in room r, or undefined when step i can't happen there.
+   For wiring the key is the panel's place in t.panels, and panels go in order after the
+   last one we know. "Outside" matches "Outside, by the thermometer". */
+function stepKeyIn(t, f, i, r) {
+  const st = t.st[i];
+  if (!st.wire) return st.r.find(x => x === r || x.startsWith(r + ','));
+  let lo = i;
+  for (let k = i - 1; k >= 0; k--) if (f.room[k] != null) { lo = f.room[k] + (i - k); break; }
+  for (let j = lo; j <= t.panels.length - (t.st.length - i); j++) if (t.panels[j] === r) return j;
+  return undefined;
+}
+
 function stepsFor(t, f, a) {
   const open = t.st.map((_, i) => i).filter(i => !f.done[i]);
   if (!open.length) return {err: `${t.n} is already ${state.mode === 'imp' ? 'faked' : 'checked off'}`};
-  /* the key for step i in room r, or undefined when step i can't happen there */
-  const keyIn = (i, r) => {
-    const st = t.st[i];
-    if (!st.wire) return st.r.includes(r) ? r : undefined;
-    let lo = i;                                    /* panels go in order, after the last one we know */
-    for (let k = i - 1; k >= 0; k--) if (f.room[k] != null) { lo = f.room[k] + (i - k); break; }
-    for (let j = lo; j <= t.panels.length - (t.st.length - i); j++) if (t.panels[j] === r) return j;
-    return undefined;
-  };
+  const keyIn = (i, r) => stepKeyIn(t, f, i, r);
   const oneAtATime = a.first || t.st.some(s => s.wire);
   let target = oneAtATime ? open[0] : open[open.length - 1], key = null, warn = null;
   if (a.i != null) {
@@ -1420,6 +1426,60 @@ function doTask(t, a) {
   return {msg, warn: pick.warn};
 }
 
+/* Which step of t a room from your list belongs to, and its key. The steps whose room only
+   your list knows come first (where the download is, which wiring panel is first), then any
+   step that happens there. want is a step the words named ("upload" is the last one). */
+function stepForRoom(t, f, room, want) {
+  const open = t.st.map((_, i) => i).filter(i => !f.done[i]);
+  const listed = i => t.st[i].pick || t.st[i].wire || t.st[i].auto;
+  const order = want != null ? [want] : [...open.filter(listed), ...open.filter(i => !listed(i))];
+  for (const i of order) {
+    const key = stepKeyIn(t, f, i, room);
+    if (key !== undefined) return {i, key};
+  }
+  return null;
+}
+
+/* "my tasks are admin swipe card, cafeteria download": put tasks on your list (crewmate) or your
+   fake route (impostor) with the rooms your list shows. Nothing gets checked off. A task that's
+   already there just gets the room, so "download in weapons" fixes a room later. */
+function addTasks(items) {
+  const imp = state.mode === 'imp', book = imp ? state.fakes : state.mine;
+  const added = [], placed = [], warn = [];
+  for (const it of items) {
+    const t = taskByName(it.n);
+    if (!t) continue;
+    const isNew = !book[t.n];
+    if (isNew) { book[t.n] = blankTask(t); added.push(t.n); }
+    if (!it.room) continue;
+    const f = book[t.n], s = stepForRoom(t, f, it.room, it.i);
+    if (!s) { warn.push(`${stepName(t, it.i != null ? it.i : 0)} isn't in ${it.room}`); continue; }
+    f.room[s.i] = s.key;
+    if (!isNew) placed.push(`${stepName(t, s.i)} is in ${stageRoom(t, s.i, s.key)}`);
+  }
+  /* rooms only your list knows that are still missing, so the route doesn't guess */
+  const missing = [...new Set(items.map(it => it.n))].map(n => {
+    const t = taskByName(n), f = book[n];
+    if (!t || !f) return null;
+    const i = t.st.findIndex((st, k) => !f.done[k] && f.room[k] == null && (st.pick || (st.wire && k === f.done.filter(Boolean).length)));
+    return i < 0 ? null : {t, i};
+  }).filter(Boolean);
+  if (missing.length) {
+    const {t, i} = missing[0], st = t.st[i];
+    const room = (st.wire ? t.panels[0] : st.r[0]).toLowerCase();
+    const say = t.n === 'Divert Power' ? `divert power to ${room}` : `${(taskSay(t.n) || t.n).split(',')[0].trim().toLowerCase()} in ${room}`;
+    warn.push(`Which room does your list show for ${andList(missing.map(x => x.t.n))}? Say it like "${say}"`);
+  }
+  const names = Object.keys(book).filter(n => taskByName(n));
+  let msg = added.length ? `${imp ? 'Faking' : 'Your tasks'}: ${andList(added)}` : placed.length ? capFirst(andList(placed)) : 'Those are already on your list';
+  if (added.length && placed.length) msg += `. ${capFirst(andList(placed))}`;
+  if (imp) {
+    const stops = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+    if (stops.length) msg += `. Next stop: ${stops[0].room}`;
+  } else msg += `. ${doneCount()} of ${names.length} done`;
+  return {msg, warn};
+}
+
 /* "what did I do": what you've checked off (or faked), and what's half done */
 function taskSummary() {
   const imp = state.mode === 'imp', book = imp ? state.fakes : state.mine;
@@ -1430,26 +1490,26 @@ function taskSummary() {
     if (k === t.st.length) done.push(n); else if (k) part.push(`${n} ${k}/${t.st.length}`); else todo.push(n);
   }
   if (!done.length && !part.length && !todo.length)
-    return imp ? 'No fake tasks yet. Add them on the Tasks tab, or say "did swipe card" as you fake one' : 'Nothing checked off yet. Say "did swipe card" when you finish one';
+    return `No tasks yet. Read yours off the screen: "my tasks are admin swipe card, cafeteria download"`;
   const out = [];
   if (done.length) out.push(`${imp ? 'Faked' : 'Done'}: ${andList(done)}`);
   if (part.length) out.push(`Started: ${andList(part)}`);
-  if (todo.length) out.push(`Still to fake: ${andList(todo)}`);
+  if (todo.length) out.push(`Still to ${imp ? 'fake' : 'do'}: ${andList(todo)}`);
   return out.join('. ');
 }
 
 /* ---- My tasks (crewmate) ---- */
 function mineCard() {
   const names = Object.keys(state.mine).filter(n => taskByName(n));
-  const head = `<div class="card-head"><h2>My tasks</h2><span class="sub">${names.length ? `${doneCount()} done` : 'Check off what you finish'}</span></div>`;
+  const head = `<div class="card-head"><h2>My tasks</h2><span class="sub">${names.length ? `${doneCount()} of ${names.length} done` : 'Check off what you finish'}</span></div>`;
   if (!names.length) return `<section class="card">${head}
-    <p class="empty">Say "did swipe card" when you finish a task, or tap Done next to it below. What you check off shows up in meetings with the room, so you can say exactly where you were.</p></section>`;
+    <p class="empty">At the start, read your list off the screen: "my tasks are admin swipe card, cafeteria download, electrical wires". Then say "did download" when you finish one, and it already knows the room. You can also tap Done next to a task below. What you check off shows up in meetings, so you can say exactly where you were.</p></section>`;
   return `<section class="card">${head}<ul class="tlist">${names.map(n => {
     const t = taskByName(n), f = state.mine[n], k = f.done.filter(Boolean).length, all = k === t.st.length;
     const chain = t.st.map((x, i) => `${f.done[i] ? '✓ ' : ''}${stageLabel(t, i, f.room[i])}`).join(' → ');
     return `<li class="trow"><div class="t-name">${esc(n)} <span class="tag ${all ? 'st-safe' : ''}">${all ? 'Done' : `${k}/${t.st.length}`}</span></div>
       <div class="t-chain">${esc(chain)}</div>
-      <div class="t-side">${all ? '' : `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(n)}">${t.st.some(s => s.wire) ? 'Next panel' : 'Finish'}</button>`}
+      <div class="t-side">${all ? '' : `<button type="button" class="btn sm" data-action="mineDone" data-v="${esc(n)}">${t.st.some(s => s.wire) && k ? 'Next panel' : k ? 'Finish' : 'Done'}</button>`}
         <button type="button" class="btn ghost sm" data-action="mineClear" data-v="${esc(n)}">Remove</button></div></li>`;
   }).join('')}</ul></section>`;
 }
@@ -1563,6 +1623,7 @@ function viewSetup() {
     <section class="card about">
       <p>Fan-made tool. Not affiliated with or endorsed by Innersloth. Task data comes from the Among Us Wiki and guide sites as of October 2026; times marked approx. are estimates.</p>
       <p>Your games are saved in this browser only.</p>
+      <p>Version ${esc(BUILD)}${builtText() ? `, updated ${esc(builtText())}` : ''}.</p>
     </section>`;
 }
 
@@ -1748,6 +1809,15 @@ const TASK_SAYS = [
 ];
 /* past tense means it already happened, so "uploaded in admin" needs no "did" */
 const PAST = /\b(?:\w+ed|made|built|threw|caught|rewound|shot|bought|found|ran)\b/;
+
+/* words that tie a room to the task before it: "download IN cafeteria", "divert power TO shields" */
+const LINK = new Set(['in', 'at', 'to', 'from', 'inside', 'on', 'by', 'near']);
+/* can room r be part of task n on map mp: any of its steps, or one of its wiring panels? */
+function taskRoomOK(mp, n, r) {
+  const t = (mp.tasks || []).find(x => x.n === n);
+  if (!t || !r) return false;
+  return t.st.some(s => s.wire ? (t.panels || []).includes(r) : s.r.some(x => x === r || x.startsWith(r + ',')));
+}
 
 /* "did reactor": the task named after that room (Start Reactor), else the
    only task with a fixed step there. null when it could be more than one. */
@@ -1987,22 +2057,56 @@ function parseCommand(text, ctx) {
   }
 
   const mp = MAPS[ctx.map] || MAPS.skeld;
-  const toks = tokenizeSpeech(clean.split(' '), voiceLexicon(ctx), ctx);
+  const L = voiceLexicon(ctx);
+  /* "my tasks are admin swipe card, cafeteria download": your list, read off the game's screen.
+     The tasks go on your list (or your fake route) with their rooms, and nothing gets checked off. */
+  const lm = /^(?:my (?:fake )?(?:tasks?|task list|list)(?: is| are)?|fake tasks?(?: are| is)?|tasks? (?:are|is)|task list(?: is)?|i (?:have|got|need to do)(?! (?:done|finished|completed|did)\b)|add(?: tasks?)?)\s+(.+)$/.exec(clean);
+  const hasTask = ts => ts.some(t => (t.t === 'task' && !t.off) || (t.t === 'kw' && t.task));
+  let toks = tokenizeSpeech((lm ? lm[1] : clean).split(' '), L, ctx);
+  const listing = !!lm && hasTask(toks);
+  if (lm && !listing) toks = tokenizeSpeech(clean.split(' '), L, ctx);      /* "I have to go" isn't a list */
 
   /* Walk the tokens and cut them into clauses, one per thing you saw:
      "black in admin red sus" -> [black, Admin] [red, sus].
      A new color starts a new clause once the current one is complete.
      A clause with tasks and no player in it is yours: "did wires in admin". */
   const fresh = () => ({colors: [], before: [], room: null, kind: null, imp: null, neg: false, passive: false, self: false,
-    tasks: [], ptask: null, vtask: null, past: false});
+    tasks: [], ptask: null, pending: null});
   const anyone = x => x.colors.length + x.before.length > 0 || x.self;
   const someone = x => x.colors.length + x.before.length > 0;       /* another player, not you */
   const complete = x => x.tasks.length > 0 || (anyone(x) && !!(x.room || x.kind || x.imp != null || x.ptask));
   const groups = [], reporters = [], flags = {};
   let g = fresh();
-  const close = () => { if (anyone(g) || g.room || g.tasks.length || g.vtask) groups.push(g); g = fresh(); };
+  /* A room said without "in" waits for the task after it, the way the game's list reads
+     ("Cafeteria: Download Data"). Left over at the end, it goes to the task before it:
+     "did download cafeteria", "did wires in admin and electrical". */
+  const flushPending = () => {
+    const r = g.pending; if (!r) return;
+    g.pending = null;
+    const last = g.tasks[g.tasks.length - 1];
+    if (!last) return;
+    if (!last.room) last.room = r;
+    else if (taskRoomOK(mp, last.n, r)) g.tasks.push({...last, room: r});
+  };
+  /* one of your own tasks, taking the room said just before it if that room fits */
+  const pushTask = tok => {
+    if (complete(g) && !g.tasks.length) close();
+    let room = g.pending || (!g.tasks.length ? g.room : null) || null;
+    g.pending = null;
+    if (room && !taskRoomOK(mp, tok.n, room)) {
+      /* "download cafeteria swipe card": the room fits the task before, not this one */
+      const last = g.tasks[g.tasks.length - 1];
+      if (last && !last.room && taskRoomOK(mp, last.n, room)) last.room = room;
+      room = null;
+    }
+    g.tasks.push({n: tok.n, i: tok.i ?? null, room, past: !!tok.past});
+  };
+  const close = () => { flushPending(); if (anyone(g) || g.room || g.tasks.length) groups.push(g); g = fresh(); };
+  let prevRaw = '';
 
   for (const tok of toks) {
+    const linked = LINK.has(prevRaw);      /* the word before was "in", "to", ... */
+    prevRaw = tok.raw;
     switch (tok.t) {
       case 'color':
         /* "red killed black": keep adding victims until a room shows up */
@@ -2014,10 +2118,12 @@ function parseCommand(text, ctx) {
         g.self = true;
         break;
       case 'room':
-        /* right after one of your tasks it's where you did it: "did wires in admin and electrical" */
+        /* after one of your tasks: "in" ties it to that task ("download in cafeteria"),
+           otherwise it waits for the next task ("cafeteria download") */
         if (g.tasks.length && !someone(g)) {
           const last = g.tasks[g.tasks.length - 1];
-          if (!last.room) last.room = tok.r; else g.tasks.push({...last, room: tok.r});
+          if (linked && taskRoomOK(mp, last.n, tok.r)) { if (!last.room) last.room = tok.r; else g.tasks.push({...last, room: tok.r}); }
+          else { flushPending(); g.pending = tok.r; }
           break;
         }
         if (g.room && anyone(g)) close();
@@ -2026,12 +2132,11 @@ function parseCommand(text, ctx) {
       case 'task':
         if (tok.off) { flags.off = flags.off || tok.n; break; }   /* a task from another map */
         if (someone(g)) { g.ptask = tok; break; }                /* "red did wires": what red was doing */
-        if (complete(g) && !g.tasks.length) close();
-        g.tasks.push({n: tok.n, i: tok.i, room: null, past: !!tok.past});
+        pushTask(tok);
         break;
       case 'kw': {
         if (!someone(g)) {
-          if (tok.task) { g.vtask = tok.task; if (tok.past) g.past = true; }                 /* "did scan" about yourself */
+          if (tok.task) { pushTask({...tok.task, past: tok.past}); break; }                 /* "did scan" about yourself */
           if (tok.k === 'sus' && /^fak/.test(tok.raw)) { flags.trig = true; break; }         /* impostor: "faked swipe card" */
           if (tok.k === 'safe' && /^crew/.test(tok.raw)) flags.role = 'crew';               /* "new game, I'm crew" */
         }
@@ -2080,17 +2185,20 @@ function parseCommand(text, ctx) {
   close();
 
   /* clauses -> actions */
-  const actions = [], warn = [], unsaid = [];
+  const actions = [], warn = [], unsaid = [], adds = [];
   let prev = null, selfRoom = null;
   for (const x of groups) {
     let kind = x.kind || (x.imp === true ? 'sus' : x.imp === false ? 'safe' : null);
     const people = [...x.before, ...x.colors];
     let room = x.room;
-    /* your own tasks. They need "did", "done" or a past tense, so "I still need wires" checks nothing off */
-    if (!people.length && (x.tasks.length || x.vtask)) {
-      const list = x.tasks.length ? x.tasks : [{n: x.vtask.n, i: x.vtask.i, room: null, past: x.past}];
-      for (const k of list) {
-        if (flags.trig || k.past) actions.push({type: 'task', n: k.n, i: k.i, room: k.room || room || selfRoom, first: !!flags.first});
+    /* Your own tasks. Checking one off needs "did", "done" or a past tense, so "I still need wires"
+       checks nothing off. A task with a room and no "did" ("download in cafeteria") says where it
+       is, so it goes on your list with that room, like everything in "my tasks are ...". */
+    if (!people.length && x.tasks.length) {
+      for (const k of x.tasks) {
+        const here = k.room || (selfRoom && taskRoomOK(mp, k.n, selfRoom) ? selfRoom : null);
+        if (listing || (!flags.trig && !k.past && k.room)) adds.push({n: k.n, i: k.i, room: k.room});
+        else if (flags.trig || k.past) actions.push({type: 'task', n: k.n, i: k.i, room: here, first: !!flags.first});
         else unsaid.push(k.n);
       }
       continue;
@@ -2140,6 +2248,7 @@ function parseCommand(text, ctx) {
     prev = {kind: kind || 'seen', room, who: people};
   }
 
+  if (adds.length) actions.push({type: 'tasks', items: adds});
   if (flags.endmeet) actions.unshift({type: 'endmeet'});
   if (flags.meet) actions.push({type: 'meet', reporters});
   /* "done" alone fakes the impostor's next stop; with a task named, it's that task */
@@ -2248,6 +2357,11 @@ function applyPlan(actions) {
         break;
       }
       case 'tasklist': info.push(taskSummary()); break;
+      case 'tasks': {
+        const r = addTasks(a.items);
+        said.push(r.msg); warn.push(...r.warn);
+        break;
+      }
       case 'newgame':
         startNewGame(a.mode);
         said.push(`New game${a.mode ? `. You're ${a.mode === 'imp' ? 'an impostor' : 'crew'}` : ''}`);
@@ -2340,7 +2454,11 @@ function applyPlan(actions) {
         const first = stops[0].steps[0];
         if (first.wait > 0.5) { warn.push(`${first.t.n} isn't ready yet. Come back in ${fmtLeft(first.wait * 1000)}`); break; }
         stops[0].steps.forEach(s => completeStep(s.t, s.i, s.key, true));
-        said.push(`Faked ${andList([...new Set(stops[0].steps.map(s => s.t.n))])} in ${stops[0].room}`);
+        /* say where to walk next, so you never have to look */
+        const after = toStops(planRoute(map(), state.fakes, routeStart(), Date.now()));
+        const next = !after.length ? '. Every fake task is done' : after[0].steps[0].wait > 0.5
+          ? `. Nothing to fake for ${fmtLeft(after[0].steps[0].wait * 1000)}, then ${after[0].room}` : `. Next stop: ${after[0].room}`;
+        said.push(`Faked ${andList([...new Set(stops[0].steps.map(s => s.t.n))])} in ${stops[0].room}${next}`);
         break;
       }
     }
@@ -2461,9 +2579,8 @@ function renderHelp() {
     ['Bodies and kills', ['black dead in electrical', 'red killed black in electrical', 'red vented in nav']],
     ['Marks', ['red sus', "blue's not sus", 'purple did scan', 'white ejected, not the impostor']],
     ['Meetings', ['meeting', 'blue reported black dead in storage', 'red says they were in nav', 'back to tasks']],
-    ['Your tasks', ['did swipe card', 'did wires in electrical',
-      ...(taskByName('Upload Data') && m.upload && !m.upload.includes(',') ? [`uploaded in ${m.upload.toLowerCase()}`] : []), 'what did I do']],
-    ['Impostor games', ["I'm in electrical", 'done', 'faked swipe card', 'red partner']],
+    ['Your tasks', ['my tasks are admin swipe card, cafeteria download', 'did swipe card', 'did download', 'what did I do']],
+    ['Impostor games', ['my tasks are ...', 'done', 'faked swipe card', "I'm in electrical", 'red partner']],
     ['New game', ['new game', "new game, I'm impostor"]],
     ['Mistakes and notes', ['undo', 'undo, black in med bay', 'note yellow followed me']]
   ];
@@ -2741,6 +2858,7 @@ const actions = {
     startNewGame();
     commit(); toast('New game started');
   },
+  reloadPage() { location.reload(); },
   mineDone(n) {
     const t = taskByName(n); if (!t) return;
     const r = doTask(t, {i: null, room: null});
@@ -2980,7 +3098,27 @@ function start(data) {
   }
   render();
   initHandsFree();
+  checkUpdate();
+  setInterval(checkUpdate, 5 * 60 * 1000);
 }
+
+/* ---- Staying up to date ----
+   A page left open all game can be an old version. build.py stamps BUILD into the page and
+   writes the same stamp to version.json beside it on the site. Whenever you come back to the
+   page (and every 5 minutes) it asks the site for version.json; a different stamp means a
+   newer version is out, so the Update banner shows. Only on the site, not inside Claude. */
+const BUILD = '0eaa398c', BUILT = '2026-11-08T02:58:28Z';
+const onSite = () => { try { return !!HANDS_FREE_URL && location.hostname === new URL(HANDS_FREE_URL).hostname; } catch (e) { return false; } };
+const builtText = () => { const d = new Date(BUILT); return isNaN(d) ? '' : d.toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}); };
+async function checkUpdate() {
+  if (!onSite() || navigator.onLine === false) return;
+  try {
+    const res = await fetch('version.json', {cache: 'no-store'});     /* no-store: skip the browser's saved copy */
+    const v = res.ok ? await res.json() : null;
+    if (v && v.build && v.build !== BUILD) $('#update').hidden = false;
+  } catch (e) { /* offline or blocked: try again next time */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
 window.claude?.hot?.snapshot?.(() => ({state}));
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 </script>
